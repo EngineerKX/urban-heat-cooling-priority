@@ -1,0 +1,35 @@
+# --- Python environment ---
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- Secrets ---
+.env
+.env.local
+credentials/
+
+# --- Data: regenerated via src/ingest, not committed ---
+data/raw/**
+data/interim/**
+data/processed/**
+!data/raw/**/
+!data/interim/**/
+!data/processed/**/
+!**/.gitkeep
+# data/labels/ is small (~300 pts) — stays tracked normally
+
+# --- Model weights: large binaries, use DVC/LFS/Release instead ---
+models/*
+!models/*.md
+!models/.gitkeep
+
+# --- App/runtime ---
+.streamlit/secrets.toml
+*.log
+
+# --- Editor / OS ---
+.vscode/
+.DS_Store
+Thumbs.db
