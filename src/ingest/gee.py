@@ -40,6 +40,23 @@ def init_ee(force: bool = False) -> None:
     print(f"EE initialized OK (service account), project: {GEE_PROJECT_ID}")
 
 
+def _gcs_client():
+    """Cloud Storage client, authenticated with the SAME service-account key
+    already configured for Earth Engine. `google-cloud-storage` is a
+    separate credential system from `ee` and does not reuse `init_ee()`'s
+    credentials automatically — left to its default behavior, it looks for
+    Application Default Credentials (only present if you've separately run
+    `gcloud auth application-default login`), which nothing in this project
+    sets up. Passing the service-account file explicitly avoids that
+    dependency entirely.
+    """
+    from google.cloud import storage
+    from google.oauth2 import service_account
+
+    credentials = service_account.Credentials.from_service_account_file(GEE_PRIVATE_KEY_PATH)
+    return storage.Client(project=GEE_PROJECT_ID, credentials=credentials)
+
+
 def date_filter_for_years_months(collection, years, months):
     """Union filter: keep images that fall in ANY (year, month) combo — used
     to build season-controlled, multi-year composites (C4). A plain
@@ -185,8 +202,6 @@ def export_patches_to_gcs(image, description: str, bucket: str, prefix: str, reg
     import time
     from pathlib import Path
 
-    from google.cloud import storage
-
     if not bucket:
         raise RuntimeError(
             "GEE_EXPORT_BUCKET is not set in .env — a GCS bucket is required for TFRecord "
@@ -210,11 +225,16 @@ def export_patches_to_gcs(image, description: str, bucket: str, prefix: str, reg
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    client = storage.Client(project=GEE_PROJECT_ID)
+    client = _gcs_client()
     blobs = list(client.list_blobs(bucket, prefix=prefix))
     for blob in blobs:
         local_path = out_dir / Path(blob.name).name
-        blob.download_to_filename(str(local_path))
+        # blob.download_to_filename() also calls os.utime() afterward to
+        # match the blob's cloud mtime — unsupported on WSL2's Windows-
+        # mounted filesystem (/mnt/c/...), which raises PermissionError.
+        # download_to_file() writes the same bytes without that step.
+        with open(local_path, "wb") as f:
+            client.download_blob_to_file(blob, f)
     print(f"Downloaded {len(blobs)} file(s) to {out_dir}")
     return out_dir
 
@@ -275,8 +295,6 @@ def export_geotiff_to_gcs(image, description: str, bucket: str, prefix: str, reg
     import time
     from pathlib import Path
 
-    from google.cloud import storage
-
     if not bucket:
         raise RuntimeError(
             "GEE_EXPORT_BUCKET is not set in .env — a GCS bucket is required to export "
@@ -298,9 +316,13 @@ def export_geotiff_to_gcs(image, description: str, bucket: str, prefix: str, reg
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    client = storage.Client(project=GEE_PROJECT_ID)
+    client = _gcs_client()
     blob = client.bucket(bucket).blob(f"{prefix}.tif")
-    blob.download_to_filename(str(out_path))
+    # See the matching note in export_patches_to_gcs — download_to_file()
+    # avoids the os.utime() call that download_to_filename() makes, which
+    # fails with PermissionError on WSL2's Windows-mounted filesystem.
+    with open(out_path, "wb") as f:
+        client.download_blob_to_file(blob, f)
     print(f"✅ Downloaded raster -> {out_path}")
     return out_path
 

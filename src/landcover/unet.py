@@ -42,15 +42,35 @@ def build_training_stack(feature_image, wc_bucket_image, training_region):
     """wc_class values are 1-4 (buckets); pixels outside the mask get filled
     with 0 ("no valid label") so the exported patch always has a defined
     value per pixel — the sample-weight mask in `parse_training_patches`
-    uses this to exclude those pixels from the loss."""
+    uses this to exclude those pixels from the loss.
+
+    `.toFloat()` matters here: GEE's TFRecord patch export encodes each
+    band independently based on its own pixel type, and a non-float band
+    mixed in with float bands (every S2/index band already is float) gets
+    written as a single opaque bytes blob instead of a flat per-pixel
+    float array — silently breaking `parse_training_patches`'s fixed-shape
+    float32 parsing for that one band. Casting keeps every band in the
+    stack encoded the same way.
+    """
     return (
-        feature_image.addBands(wc_bucket_image.select("wc_class").unmask(0))
+        feature_image.addBands(wc_bucket_image.select("wc_class").unmask(0).toFloat())
         .clip(training_region)
     )
 
 
+def _patches_already_downloaded(out_dir: Path) -> bool:
+    """True if `out_dir` already has both the TFRecord shard(s) and the
+    mixer/metadata JSON from a previous export — lets re-runs skip the
+    expensive GCS export + download instead of redoing it every time."""
+    out_dir = Path(out_dir)
+    return bool(list(out_dir.glob("*.tfrecord.gz"))) and bool(list(out_dir.glob("*.json")))
+
+
 def export_training_patches(training_stack, training_region, patch_size=settings.UNET_PATCH_SIZE,
-                             scale=TARGET_SCALE_M, crs=S2_UTM_CRS, bucket=GEE_EXPORT_BUCKET):
+                             scale=TARGET_SCALE_M, crs=S2_UTM_CRS, bucket=GEE_EXPORT_BUCKET, force: bool = False):
+    if not force and _patches_already_downloaded(TRAIN_PATCH_DIR):
+        print(f"Training patches already downloaded at {TRAIN_PATCH_DIR} — skipping export (pass force=True to redo).")
+        return TRAIN_PATCH_DIR
     return export_patches_to_gcs(
         training_stack, description="unet_train", bucket=bucket, prefix="unet_train_patches/unet_train",
         region=training_region, scale=scale, crs=crs, patch_dimensions=(patch_size, patch_size),
@@ -59,7 +79,10 @@ def export_training_patches(training_stack, training_region, patch_size=settings
 
 
 def export_inference_patches(feature_image, boundary, patch_size=settings.UNET_PATCH_SIZE,
-                              scale=TARGET_SCALE_M, crs=S2_UTM_CRS, bucket=GEE_EXPORT_BUCKET):
+                              scale=TARGET_SCALE_M, crs=S2_UTM_CRS, bucket=GEE_EXPORT_BUCKET, force: bool = False):
+    if not force and _patches_already_downloaded(INFERENCE_PATCH_DIR):
+        print(f"Inference patches already downloaded at {INFERENCE_PATCH_DIR} — skipping export (pass force=True to redo).")
+        return INFERENCE_PATCH_DIR
     return export_patches_to_gcs(
         feature_image.clip(boundary), description="unet_inference", bucket=bucket,
         prefix="unet_inference_patches/unet_inference", region=boundary, scale=scale, crs=crs,
@@ -184,22 +207,37 @@ def train_unet(train_ds, val_ds, patch_size=settings.UNET_PATCH_SIZE, n_feature_
     return model, history
 
 
-def run_inference_and_reconstruct(model, inference_patch_dir, patch_size=settings.UNET_PATCH_SIZE,
+def run_inference_and_reconstruct(model, inference_patch_dir, boundary, patch_size=settings.UNET_PATCH_SIZE,
                                    feature_bands=ALL_FEATURE_BANDS, out_path=CLASSIFIED_RASTER_PATH):
     """Reads mixer.json (patch grid layout + georeferencing, written
     automatically alongside the patches) to lay predicted patches back into
     a single georeferenced raster. Known limitation carried over from the
     notebook: non-overlapping patches can leave minor discontinuities at
-    patch boundaries ("tile seams") — acceptable for a baseline comparison."""
+    patch boundaries ("tile seams") — acceptable for a baseline comparison.
+
+    Unlike `ee.Classifier.classify()` (used by the RF baseline), which
+    automatically carries the input mask through to the output, per-patch
+    CNN inference has no notion of "outside the mask" — every patch gets a
+    real class prediction, including the padding area between Singapore's
+    actual coastline and the rectangular patch grid's bounding box (the
+    model tends to predict "water" for that blank/near-zero input, which
+    silently inflated the water class). `boundary` is used to mask those
+    pixels back to nodata (0) after reconstruction, matching RF's behavior.
+    """
     import rasterio
     import tensorflow as tf
     from rasterio.transform import Affine
 
     inference_dir = Path(inference_patch_dir)
     tfrecord_files = sorted(glob.glob(str(inference_dir / "*.tfrecord.gz")))
-    mixer_files = sorted(glob.glob(str(inference_dir / "*mixer.json")))
+    # GCS exports (Export.image.toCloudStorage, used here) name the mixer
+    # file "{prefix}.json" — Drive exports name it "{prefix}mixer.json"
+    # instead (the pattern the original notebook was written against). A
+    # plain "*.json" glob matches either, since it's the only .json file
+    # alongside the .tfrecord.gz shards either way.
+    mixer_files = sorted(glob.glob(str(inference_dir / "*.json")))
     if not tfrecord_files or not mixer_files:
-        raise FileNotFoundError(f"Missing TFRecord/mixer.json in {inference_dir}.")
+        raise FileNotFoundError(f"Missing TFRecord/mixer JSON in {inference_dir}.")
 
     with open(mixer_files[0]) as f:
         mixer = json.load(f)
@@ -235,6 +273,14 @@ def run_inference_and_reconstruct(model, inference_patch_dir, patch_size=setting
         transform = Affine(*affine_params)
     else:
         raise RuntimeError("mixer.json has no affine transform — cannot georeference the reconstructed raster.")
+
+    import geopandas as gpd
+    from rasterio.features import geometry_mask
+    from shapely.geometry import shape
+
+    boundary_gdf = gpd.GeoSeries([shape(boundary.getInfo())], crs="EPSG:4326").to_crs(crs_str)
+    outside_boundary = geometry_mask(boundary_gdf.geometry, out_shape=full_raster.shape, transform=transform, invert=False)
+    full_raster[outside_boundary] = 0
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

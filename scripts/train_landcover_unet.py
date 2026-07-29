@@ -68,7 +68,7 @@ def main(force_retrain: bool = False):
     model, _ = train_unet(train_ds, val_ds, force_retrain=force_retrain)
 
     inference_patch_dir = export_inference_patches(feature_image, boundary)
-    raster_path, crs_str = run_inference_and_reconstruct(model, inference_patch_dir)
+    raster_path, crs_str = run_inference_and_reconstruct(model, inference_patch_dir, boundary)
 
     informal_accuracy_check(raster_path, crs_str, validation_df)
     print(f"\nDone. Classified raster: {CLASSIFIED_RASTER_PATH}")
