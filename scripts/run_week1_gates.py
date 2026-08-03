@@ -300,8 +300,12 @@ if __name__ == "__main__":
     gate_g2()
     gate_g3()
     gate_g4()
-    # G5 needs two real, independently-collected label lists — placeholder
-    # example values below, replace with your own before trusting the result.
+    # These are the REAL independently-collected labels from the joint
+    # labeling session in urban_heat_sg_week1_gates.ipynb (G5 CELL 4) --
+    # confirmed identical to that notebook's values, which produce kappa
+    # =0.676 (substantial agreement) there. NOT placeholders (an earlier
+    # version of this comment incorrectly called them that, which is why
+    # project status docs described G5 as "not yet meaningful" -- it is).
     gate_g5(
         member_a_labels=[1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 1, 2, 2, 1, 2, 1, 2, 2, 2],
         member_b_labels=[1, 2, 2, 2, 2, 2, 2, 2, 1, 2, 2, 3, 2, 2, 1, 3, 1, 2, 3, 2],

@@ -15,6 +15,8 @@ optional (`use_asset_cache=True` by default) and fails soft — if your GEE
 project doesn't have a usable asset root configured yet, it just retrains.
 """
 
+from pathlib import Path
+
 import ee
 import pandas as pd
 
@@ -37,6 +39,7 @@ from src.ingest.worldcover import BUCKET_NAMES, get_worldcover_bucket_image
 
 RF_CLASSIFIER_ASSET_ID = f"projects/{GEE_PROJECT_ID}/assets/rf_landcover_classifier"
 RF_RASTER_PATH = PROCESSED_DIR / "landcover" / "rf_landcover.tif"
+RF_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "rf_landcover_prob.tif"
 
 
 def build_feature_image(sg_bbox, boundary, years, months, cloud_prob_max, crs=S2_UTM_CRS, scale=TARGET_SCALE_M):
@@ -145,6 +148,39 @@ def classify(feature_image, classifier, boundary):
     return feature_image.classify(classifier).rename("rf_class").clip(boundary)
 
 
+def classify_probability(feature_image, classifier, boundary, valid_mask, class_names=BUCKET_NAMES):
+    """Same feature_image, MULTIPROBABILITY output mode instead of hard
+    labels. `classifier` MUST be one trained fresh in the current session --
+    empirically confirmed that a classifier round-tripped through
+    Export.classifier.toAsset / ee.Classifier.load() only supports
+    CLASSIFICATION mode; calling setOutputMode("MULTIPROBABILITY") on a
+    loaded asset classifier fails with "Trainer only supports the mode
+    'CLASSIFICATION'". See scripts/train_landcover_rf.py's
+    effective_asset_cache handling.
+
+    Band order verified empirically (not just per GEE's docs, which just say
+    "in class order" without specifying which): sampled a mixed-landcover
+    region and confirmed argmax(these 4 bands) matches the same classifier's
+    own classify() output at ~97% of pixels, with the ~3% disagreement
+    concentrated in built_up/bare near-ties (spectrally similar classes) --
+    the signature of genuine close votes, not a band-order bug. Re-verify
+    (download_small_image against a small region, compare to classify())
+    if this function or GEE's classifier behavior ever changes.
+
+    Adds an explicit `valid_mask` band from build_feature_image's own mask
+    (not inferred later from nodata) so downstream ensemble alignment never
+    has to guess which pixels are real — a probability of exactly 0.0 for a
+    class at a genuinely valid pixel is legitimate and must not be confused
+    with "outside the mask".
+    """
+    class_values = sorted(class_names.keys())
+    band_names = [f"prob_{class_names[v]}" for v in class_values]
+    prob_classifier = classifier.setOutputMode("MULTIPROBABILITY")
+    prob_image = feature_image.classify(prob_classifier).arrayFlatten([band_names])
+    prob_image = prob_image.addBands(valid_mask.rename("valid_mask")).toFloat()
+    return prob_image.clip(boundary)
+
+
 def informal_accuracy_check(classified_image, validation_df: pd.DataFrame, scale=TARGET_SCALE_M):
     """Sanity check only — NOT the formal RF-vs-U-Net-vs-ensemble evaluation."""
     validation_df = validation_df.copy()
@@ -179,8 +215,15 @@ def export_classified_raster(classified_image, boundary, scale=TARGET_SCALE_M, c
                               out_path=RF_RASTER_PATH, bucket=GEE_EXPORT_BUCKET):
     """Export the full-Singapore classified raster via Cloud Storage and
     download it straight to local disk (no Drive hop, no geemap dependency —
-    see `src/ingest/gee.py::export_geotiff_to_gcs` for why)."""
+    see `src/ingest/gee.py::export_geotiff_to_gcs` for why).
+
+    description/prefix are derived from out_path's stem (not hardcoded) so
+    that calling this twice in one run with different out_paths -- as
+    scripts/train_landcover_rf.py does for the hard-label vs. probability
+    rasters -- targets two distinct GCS objects instead of both silently
+    overwriting the same blob."""
+    stem = Path(out_path).stem
     return export_geotiff_to_gcs(
-        classified_image, description="rf_landcover_classified", bucket=bucket,
-        prefix="rf_landcover/rf_landcover_classified", region=boundary, scale=scale, crs=crs, out_path=out_path,
+        classified_image, description=stem, bucket=bucket,
+        prefix=f"rf_landcover/{stem}", region=boundary, scale=scale, crs=crs, out_path=out_path,
     )

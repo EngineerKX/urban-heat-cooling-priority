@@ -29,6 +29,10 @@ models/*
 .streamlit/secrets.toml
 *.log
 
+# --- MLflow local tracking store ---
+mlruns/
+mlflow.db
+
 # --- Editor / OS ---
 .vscode/
 .DS_Store

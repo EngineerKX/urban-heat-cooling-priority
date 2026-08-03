@@ -137,8 +137,8 @@ def export_final(df: pd.DataFrame):
 st.set_page_config(page_title="Label Validation Points", page_icon="🌿", layout="wide")
 st.title("🌿 Label Validation Points")
 st.caption(
-    "Click a marker, choose the class that matches what's actually there (WorldCover reference "
-    "is context only — never the answer), then Save. Progress autosaves after every save."
+    "Click a marker, choose the class that matches what's actually there in the imagery, "
+    "then Save. Progress autosaves after every save."
 )
 
 if "points_df" not in st.session_state:
@@ -150,13 +150,23 @@ points_df = st.session_state.points_df
 n_labeled = (points_df["agreed_label"].str.strip() != "").sum()
 st.progress(n_labeled / len(points_df) if len(points_df) else 0, text=f"{n_labeled}/{len(points_df)} labeled")
 
+SELECTED_ZOOM = 18  # close enough to judge a single ~10m pixel against the satellite basemap
+
+selected_id = st.session_state.selected_point_id
+selected_matches = points_df.index[points_df["point_id"] == selected_id] if selected_id else []
+if len(selected_matches):
+    _sel_row = points_df.loc[selected_matches[0]]
+    map_center, map_zoom = (_sel_row["lat"], _sel_row["lon"]), SELECTED_ZOOM
+else:
+    map_center, map_zoom = SG_CENTER, 12
+
 col_map, col_panel = st.columns([2, 1])
 
 with col_map:
     import folium
     from streamlit_folium import st_folium
 
-    m = folium.Map(location=SG_CENTER, zoom_start=12, tiles="Esri.WorldImagery", attr="Esri")
+    m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="Esri.WorldImagery", attr="Esri")
     for _, row in points_df.iterrows():
         labeled = bool(str(row["agreed_label"]).strip())
         color = _MARKER_COLOR.get(row["agreed_label"], "green" if labeled else "orange")
@@ -165,7 +175,16 @@ with col_map:
             fill_opacity=0.85, weight=2, tooltip=row["point_id"],
         ).add_to(m)
 
-    map_state = st_folium(m, height=560, use_container_width=True, returned_objects=["last_object_clicked_tooltip"])
+    # folium.Map's location/zoom_start only take effect on the component's
+    # very first render; st_folium keeps whatever pan/zoom the user (or the
+    # previous rerun) left the map at otherwise. Passing center/zoom here
+    # explicitly is what actually forces the view to jump to the selected
+    # point on every rerun -- without this, "jump to next unlabeled point"
+    # changes selection but the map itself doesn't move.
+    map_state = st_folium(
+        m, height=560, use_container_width=True, center=map_center, zoom=map_zoom,
+        returned_objects=["last_object_clicked_tooltip"],
+    )
     clicked_id = map_state.get("last_object_clicked_tooltip")
     if clicked_id and clicked_id != st.session_state.selected_point_id:
         st.session_state.selected_point_id = clicked_id
@@ -184,10 +203,6 @@ with col_panel:
             row = points_df.loc[idx]
             st.subheader(row["point_id"])
             st.caption(f"lon={row['lon']:.5f}, lat={row['lat']:.5f}")
-
-            wc_name = row.get("worldcover_class_name", "unknown")
-            wc_raw = row.get("worldcover_class_raw_name", "unknown")
-            st.caption(f"WorldCover reference (context only, NOT the answer): {wc_name} ({wc_raw})")
 
             label_choice = st.selectbox(
                 "Label", options=[l for l, _ in CLASS_OPTIONS],
@@ -209,7 +224,18 @@ with col_panel:
                 points_df.loc[idx, "notes"] = notes_choice
                 st.session_state.points_df = points_df
                 save_progress(points_df)
-                st.success(f"Saved {row['point_id']} -> '{label_value}'.")
+
+                # Auto-advance to the next unlabeled point (same "first
+                # unlabeled in row order" rule as the explicit jump button
+                # below) so labeling 200 points doesn't need a manual click
+                # between every single save.
+                remaining_unlabeled = points_df.loc[points_df["agreed_label"].str.strip() == "", "point_id"].tolist()
+                if remaining_unlabeled:
+                    st.session_state.selected_point_id = remaining_unlabeled[0]
+                    st.toast(f"Saved {row['point_id']} -> '{label_value}'.")
+                else:
+                    st.session_state.selected_point_id = None
+                    st.success(f"Saved {row['point_id']} -> '{label_value}'. All points labeled!")
                 st.rerun()
 
     st.divider()

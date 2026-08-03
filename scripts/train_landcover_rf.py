@@ -15,35 +15,44 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import ee
+import mlflow
 import pandas as pd
 
 from config.settings import (
     DRY_SEASON_MONTHS,
     INTERIM_DIR,
+    RF_BAG_FRACTION,
+    RF_MIN_LEAF_POPULATION,
+    RF_NUM_TREES,
     S2_CLOUD_PROB_MAX,
     S2_UTM_CRS,
     SG_BBOX,
     TARGET_SCALE_M,
+    TRAINING_POINTS_PER_CLASS,
+    VALIDATION_EXCLUSION_BUFFER_M,
     YEARS,
 )
 from src.ingest.gee import init_ee
 from src.ingest.subzones import as_ee_feature_collection, dissolve_boundary, fetch_subzones_geojson
 from src.ingest.worldcover import get_worldcover_bucket_image
 from src.landcover.rf_baseline import (
+    RF_PROB_RASTER_PATH,
     RF_RASTER_PATH,
     build_feature_image,
     build_training_region,
     classify,
+    classify_probability,
     export_classified_raster,
     extract_training_samples,
     informal_accuracy_check,
     train_rf_classifier,
 )
+from src.utils.experiment_tracking import start_run
 
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"
 
 
-def main(use_asset_cache: bool = True):
+def main(use_asset_cache: bool = True, with_probabilities: bool = False):
     if not VALIDATION_CSV.exists():
         raise FileNotFoundError(
             f"{VALIDATION_CSV} not found — generate + label the validation sample first "
@@ -64,16 +73,54 @@ def main(use_asset_cache: bool = True):
     training_region, _ = build_training_region(boundary, validation_df)
     training_fc, _ = extract_training_samples(feature_image, wc_bucket_image, training_region)
 
-    classifier = train_rf_classifier(training_fc, use_asset_cache=use_asset_cache)
-    classified = classify(feature_image, classifier, boundary)
+    with start_run("rf"):
+        mlflow.log_params({
+            "rf_num_trees": RF_NUM_TREES,
+            "rf_min_leaf_population": RF_MIN_LEAF_POPULATION,
+            "rf_bag_fraction": RF_BAG_FRACTION,
+            "training_points_per_class": TRAINING_POINTS_PER_CLASS,
+            "validation_exclusion_buffer_m": VALIDATION_EXCLUSION_BUFFER_M,
+            "n_validation_points": len(validation_df),
+            "use_asset_cache": use_asset_cache,
+            "with_probabilities": with_probabilities,
+        })
 
-    informal_accuracy_check(classified, validation_df)
-    export_classified_raster(classified, boundary)
-    print(f"\nDone. Classified raster: {RF_RASTER_PATH}")
+        # GEE constraint discovered empirically (not documented anywhere): a
+        # classifier round-tripped through Export.classifier.toAsset /
+        # ee.Classifier.load() only supports CLASSIFICATION output mode --
+        # calling setOutputMode("MULTIPROBABILITY") on a loaded asset classifier
+        # fails with "Trainer only supports the mode 'CLASSIFICATION'". Only a
+        # classifier trained fresh in the current session supports it. So when
+        # probabilities are requested, force a fresh train regardless of
+        # --no-asset-cache, and use that SAME classifier for both outputs below
+        # -- using a different (cached) classifier for the hard-label raster
+        # would let it disagree with the probability raster's own argmax.
+        effective_asset_cache = use_asset_cache and not with_probabilities
+        if with_probabilities and use_asset_cache:
+            print("--with-probabilities forces a fresh classifier train (asset-cached "
+                  "classifiers don't support MULTIPROBABILITY output mode).")
+        classifier = train_rf_classifier(training_fc, use_asset_cache=effective_asset_cache)
+        classified = classify(feature_image, classifier, boundary)
+
+        accuracy, crosstab = informal_accuracy_check(classified, validation_df)
+        export_classified_raster(classified, boundary)
+        print(f"\nDone. Classified raster: {RF_RASTER_PATH}")
+
+        mlflow.log_metric("informal_accuracy", accuracy)
+        mlflow.log_metric("n_scored", int(crosstab.values.sum()))
+        mlflow.log_artifact(str(RF_RASTER_PATH))
+
+        if with_probabilities:
+            prob_image = classify_probability(feature_image, classifier, boundary, valid_mask)
+            export_classified_raster(prob_image, boundary, out_path=RF_PROB_RASTER_PATH)
+            print(f"Probability raster: {RF_PROB_RASTER_PATH}")
+            mlflow.log_artifact(str(RF_PROB_RASTER_PATH))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-asset-cache", action="store_true", help="Always retrain instead of reusing a cached GEE asset classifier.")
+    parser.add_argument("--with-probabilities", action="store_true",
+                         help="Also export a per-class probability raster (needed for the soft-voting ensemble).")
     args = parser.parse_args()
-    main(use_asset_cache=not args.no_asset_cache)
+    main(use_asset_cache=not args.no_asset_cache, with_probabilities=args.with_probabilities)
