@@ -49,6 +49,7 @@ RAW_LANDSAT_DIR = RAW_DIR / "landsat"
 RAW_SENTINEL2_DIR = RAW_DIR / "sentinel2"
 RAW_WORLDCOVER_DIR = RAW_DIR / "worldcover"
 RAW_DYNAMIC_WORLD_DIR = RAW_DIR / "dynamic_world"
+RAW_CCI_MODIS_LST_DIR = RAW_DIR / "cci_modis_lst"
 
 DIAGNOSTICS_DIR = PROCESSED_DIR / "diagnostics"
 
@@ -82,6 +83,16 @@ SG_CENTER = (1.3521, 103.8198)  # (lat, lon)
 # of the candidates tested (see validation/input_validation/season_window.py).
 YEARS = [2021, 2022, 2023, 2024, 2025, 2026]
 DRY_SEASON_MONTHS = [4, 5, 10, 11]
+
+# Wet-season complement for S4's dry/wet hotspot-typology clustering (NOT a
+# second C4 composite — this is a clustering FEATURE, C4 itself is still
+# just the single dry-season composite above). NE monsoon, Singapore's
+# climatologically wettest months. Checked against real Landsat scene counts
+# before locking (validation/input_validation/season_window.py's
+# count_landsat_scenes): 30 usable scenes at LANDSAT_CLOUD_COVER_MAX, well
+# above MIN_DEFENSIBLE_SCENES=8 (vs. 45 for the dry window) — no widening
+# needed.
+WET_SEASON_MONTHS = [12, 1, 2]
 
 LANDSAT_CLOUD_COVER_MAX = 70  # scene-metadata prefilter (locked Week-1 gate value)
 S2_CLOUD_PROB_MAX = 70  # s2cloudless per-pixel probability threshold (see drift note above)
@@ -165,10 +176,24 @@ NDVI_VEGETATION_THRESHOLD = 0.35  # placeholder proxy until real S3 land-cover f
 SENSITIVITY_POPULATION_WEIGHT = 0.5  # placeholder 50/50 split vs elderly_proportion
 SENSITIVITY_ELDERLY_WEIGHT = 0.5
 
+# Which greenery-fraction source feeds the adaptive-capacity pillar's
+# canonical `greenery_fraction` column: "landcover" (the validated RF/U-Net
+# ensemble, see src/landcover/zonal.py) or "ndvi" (the older NDVI-threshold
+# proxy above). Both get computed and compared (Spearman correlation
+# printed by scripts/build_adaptive_capacity_pillar.py) regardless of this
+# setting -- it only decides which one becomes `greenery_fraction`.
+ADAPTIVE_CAPACITY_SOURCE = "landcover"
+
 # ---------------------------------------------------------------------------
 # Reproducibility
 # ---------------------------------------------------------------------------
 RANDOM_SEED = 42
+
+# ---------------------------------------------------------------------------
+# S6 — calibrated confidence bands (bootstrap over validation error)
+# ---------------------------------------------------------------------------
+PRIORITY_SCORE_BOOTSTRAP_ITERATIONS = 1000
+PRIORITY_SCORE_BAND_QUANTILES = (0.05, 0.50, 0.95)
 
 # ---------------------------------------------------------------------------
 # Rank-impact / ablation
@@ -201,9 +226,25 @@ UNET_BASE_FILTERS = 32
 UNET_EARLY_STOP_PATIENCE = 5
 UNET_TRAIN_VAL_SPLIT = 0.85
 
+# ---------------------------------------------------------------------------
+# S5 — XGBoost + CNN predictive heat model (C2)
+# ---------------------------------------------------------------------------
+XGB_N_ESTIMATORS = 300
+XGB_MAX_DEPTH = 4
+XGB_LEARNING_RATE = 0.05
+XGB_SUBSAMPLE = 0.8
+
+CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.keras"
+
+# ---------------------------------------------------------------------------
+# MODIS LST secondary cross-check (proposal's data plan table)
+# ---------------------------------------------------------------------------
+MODIS_LST_ASSET = "MODIS/061/MOD11A2"
+MODIS_LST_SCALE_M = 1000
+
 for _dir in (
     RAW_URA_SUBZONES_DIR, RAW_NEA_STATIONS_DIR, RAW_SINGSTAT_DIR,
-    RAW_LANDSAT_DIR, RAW_SENTINEL2_DIR, RAW_WORLDCOVER_DIR, RAW_DYNAMIC_WORLD_DIR,
+    RAW_LANDSAT_DIR, RAW_SENTINEL2_DIR, RAW_WORLDCOVER_DIR, RAW_DYNAMIC_WORLD_DIR, RAW_CCI_MODIS_LST_DIR,
     INTERIM_DIR, PROCESSED_DIR, DIAGNOSTICS_DIR, MODELS_DIR,
 ):
     _dir.mkdir(parents=True, exist_ok=True)

@@ -10,12 +10,21 @@ from config.settings import RANDOM_SEED
 from src.utils.geo import normalize
 
 
-def build_score(df: pd.DataFrame, exposure_col: str, weighting: str, seed: int = RANDOM_SEED):
+def build_score(
+    df: pd.DataFrame, exposure_col: str, weighting: str, seed: int = RANDOM_SEED,
+    adaptive_capacity_col: str = "greenery_fraction",
+):
     """Build the cooling-priority score for one exposure (heat-layer) column.
     Sensitivity and adaptive-capacity deficit are held fixed — only the
     exposure input and the weighting scheme vary between calls, which is
     what makes this reusable both for the production score and for the C3
     ablation (see validation/score_validation/rank_impact.py).
+
+    `adaptive_capacity_col` defaults to "greenery_fraction" so every
+    existing call site is unaffected; pass a different column name to
+    compare the NDVI-threshold vs. land-cover-ensemble adaptive-capacity
+    sources (see config.settings.ADAPTIVE_CAPACITY_SOURCE) without
+    duplicating this function.
 
     `weighting="pca"` fits a fresh 1-component PCA on every call — the sign
     of the fitted loadings is aligned to the exposure loading only, so a
@@ -27,7 +36,7 @@ def build_score(df: pd.DataFrame, exposure_col: str, weighting: str, seed: int =
     """
     exposure_norm = normalize(df[exposure_col])
     sensitivity_norm = normalize(df["sensitivity_raw"])
-    adaptive_deficit_norm = normalize(1 - df["greenery_fraction"])
+    adaptive_deficit_norm = normalize(1 - df[adaptive_capacity_col])
 
     pillars = pd.DataFrame({
         "exposure": exposure_norm,

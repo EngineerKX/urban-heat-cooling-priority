@@ -327,6 +327,31 @@ def export_geotiff_to_gcs(image, description: str, bucket: str, prefix: str, reg
     return out_path
 
 
+def fetch_modis_lst_collection(sg_bbox, years, months, day_or_night: str = "day"):
+    """MODIS/061/MOD11A2, 8-day 1km LST composites, season-filtered (reuses
+    date_filter_for_years_months unmodified) -- a genuine LST product
+    (same physical quantity as Landsat's thermal band), unlike NEA's
+    air-temperature proxy, at the cost of much coarser 1km resolution.
+    Used as the S5-adjacent secondary LST cross-check
+    (validation/input_validation/modis_heldout.py). 0 is this product's
+    fill value, not a legitimate 0 Kelvin reading -- masked out before the
+    Kelvin*0.02 -> Celsius scale conversion."""
+    band = "LST_Day_1km" if day_or_night == "day" else "LST_Night_1km"
+    collection = (
+        ee.ImageCollection("MODIS/061/MOD11A2")
+        .filterBounds(sg_bbox)
+        .select(band)
+    )
+    collection = date_filter_for_years_months(collection, years, months)
+
+    def _scale_and_mask(image):
+        valid = image.select(band).gt(0)
+        lst_c = image.select(band).multiply(0.02).subtract(273.15).rename("LST_C")
+        return lst_c.updateMask(valid)
+
+    return collection.map(_scale_and_mask)
+
+
 def coverage_fraction(image, band_name, aoi, scale) -> float:
     """Fraction of `aoi` pixels that have valid (unmasked) data in `image`.
     Low coverage means the compositing window/threshold needs widening."""

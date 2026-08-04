@@ -10,6 +10,7 @@ them without checking with whoever owns S6 — see
 """
 
 import ee
+import geopandas as gpd
 import pandas as pd
 
 from config.settings import (
@@ -22,6 +23,8 @@ from config.settings import (
 )
 from src.ingest.gee import add_spectral_indices, fetch_sentinel2_collection
 from src.ingest.singstat import fetch_population_by_subzone
+from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+from src.landcover.zonal import zonal_class_fractions
 from src.utils.geo import normalize, zonal_mean
 
 
@@ -111,5 +114,33 @@ def build_adaptive_capacity_pillar(
     n_matched = len(heat_ids & ac_ids)
     n_unmatched_heat = len(heat_ids - ac_ids)
     print(f"Matched: {n_matched} | Heat-CSV subzones with no greenery match: {n_unmatched_heat}")
+
+    return ac_df[ac_df["subzone_id"].astype(str).isin(heat_ids)].copy()
+
+
+# --- Adaptive-capacity pillar (real S3 land-cover ensemble) -----------------
+
+def build_adaptive_capacity_pillar_landcover(
+    subzones_gdf: gpd.GeoDataFrame,
+    id_property: str,
+    heat_subzone_ids: pd.Series,
+    raster_path=ENSEMBLE_RASTER_PATH,
+) -> pd.DataFrame:
+    """Returns [subzone_id, greenery_fraction] using the validated RF/U-Net
+    ensemble's vegetation fraction per subzone -- the real S3 output that
+    build_adaptive_capacity_pillar's NDVI threshold was always described as
+    "standing in" for. That NDVI-based function is left untouched so both
+    remain callable for comparison (see ADAPTIVE_CAPACITY_SOURCE and
+    scripts/build_adaptive_capacity_pillar.py's printed Spearman check).
+    """
+    frac_df = zonal_class_fractions(raster_path, subzones_gdf, id_property)
+    ac_df = frac_df.rename(columns={"fraction_vegetation": "greenery_fraction"})
+    ac_df = ac_df[["subzone_id", "greenery_fraction"]]
+
+    heat_ids = set(heat_subzone_ids.astype(str))
+    ac_ids = set(ac_df["subzone_id"].astype(str))
+    n_matched = len(heat_ids & ac_ids)
+    n_unmatched_heat = len(heat_ids - ac_ids)
+    print(f"Matched: {n_matched} | Heat-CSV subzones with no land-cover greenery match: {n_unmatched_heat}")
 
     return ac_df[ac_df["subzone_id"].astype(str).isin(heat_ids)].copy()

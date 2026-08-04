@@ -197,8 +197,14 @@ def parse_training_patches(patch_dir, patch_size=settings.UNET_PATCH_SIZE,
     return train_ds, val_ds, n_patches
 
 
-def build_unet(input_shape, n_classes=N_CLASSES, base_filters=settings.UNET_BASE_FILTERS):
-    from tensorflow.keras import layers, models
+def build_unet_backbone(input_shape, base_filters=settings.UNET_BASE_FILTERS):
+    """3-level encoder-decoder with skip connections, WITHOUT an output
+    head -- shared by build_unet's softmax classification head and
+    src/heat_model/cnn_patches.py::build_cnn_regressor's linear regression
+    head, so the two models stay identical apart from what they predict.
+    Returns (inputs, final_decoder_features) for a caller to attach
+    `layers.Conv2D(n_outputs, 1, activation=...)` onto."""
+    from tensorflow.keras import layers
 
     def conv_block(x, filters):
         x = layers.Conv2D(filters, 3, padding="same", activation="relu")(x)
@@ -228,6 +234,13 @@ def build_unet(input_shape, n_classes=N_CLASSES, base_filters=settings.UNET_BASE
     u1 = layers.Concatenate()([u1, c1])
     d1 = conv_block(u1, base_filters)
 
+    return inputs, d1
+
+
+def build_unet(input_shape, n_classes=N_CLASSES, base_filters=settings.UNET_BASE_FILTERS):
+    from tensorflow.keras import layers, models
+
+    inputs, d1 = build_unet_backbone(input_shape, base_filters)
     outputs = layers.Conv2D(n_classes, 1, activation="softmax")(d1)
     return models.Model(inputs, outputs, name="unet_landcover")
 
