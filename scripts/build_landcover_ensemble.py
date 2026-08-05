@@ -15,9 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from config.settings import UNET_PROB_RASTER_PATH
 from src.landcover.ensemble import ENSEMBLE_RASTER_PATH, build_ensemble
 from src.landcover.rf_baseline import RF_PROB_RASTER_PATH
-from src.landcover.unet import PROB_RASTER_PATH as UNET_PROB_RASTER_PATH
 
 
 def main(force: bool = False):
@@ -31,7 +31,8 @@ def main(force: bool = False):
         raise FileNotFoundError(
             f"Missing probability raster(s): {names} — run "
             "'python scripts/train_landcover_rf.py --with-probabilities' and "
-            "'python scripts/train_landcover_unet.py --with-probabilities' first."
+            "the U-Net Colab notebook + 'python scripts/pull_models.py --model unet' + "
+            "'python scripts/run_landcover_unet_inference.py --with-probabilities' first."
         )
 
     label_path, prob_path = build_ensemble(RF_PROB_RASTER_PATH, UNET_PROB_RASTER_PATH)

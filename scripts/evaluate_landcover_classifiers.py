@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 
 from config.settings import INTERIM_DIR
+from config.settings import UNET_CLASSIFIED_RASTER_PATH as UNET_RASTER_PATH
 from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
 from src.landcover.rf_baseline import RF_RASTER_PATH
-from src.landcover.unet import CLASSIFIED_RASTER_PATH as UNET_RASTER_PATH
 from validation.landcover_validation.classifier_evaluation import (
     compare_classifiers,
     evaluate_classifier,
@@ -42,7 +42,8 @@ def main():
         raise FileNotFoundError(
             f"Missing prerequisite file(s): {', '.join(missing)} — run "
             "train_landcover_rf.py --with-probabilities, "
-            "train_landcover_unet.py --with-probabilities, and "
+            "the U-Net Colab notebook + pull_models.py + "
+            "run_landcover_unet_inference.py --with-probabilities, and "
             "build_landcover_ensemble.py first."
         )
 

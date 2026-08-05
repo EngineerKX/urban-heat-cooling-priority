@@ -177,11 +177,83 @@ then.
 
 ## 7. Optional: Cloud Storage bucket
 
-Only needed once you get to `scripts/train_landcover_unet.py` (TFRecord
-patch export) or the Random Forest raster export in
-`scripts/train_landcover_rf.py`. Create a bucket in the same GCP project
-(Cloud Storage → Buckets → Create), then set `GEE_EXPORT_BUCKET` in `.env`
-to its name.
+Needed once you get to the Random Forest raster export in
+`scripts/train_landcover_rf.py`, or anything U-Net/CNN-related (patch
+export, training, model sync — see §8 below). Create a bucket in the same
+GCP project (Cloud Storage → Buckets → Create), then set `GEE_EXPORT_BUCKET`
+in `.env` to its name. The same bucket doubles as the model-artifact sync
+target (`GCS_MODEL_BUCKET`, defaults to reusing this one — see `.env.example`).
+
+## 8. Training deep-learning models (Colab)
+
+U-Net (land-cover) and the CNN heat model both train exclusively on Google
+Colab's free GPU — **never locally**, no GPU or WSL2 needed on your machine
+at all. Local machines only ever run inference on the trained weights
+(CPU is plenty).
+
+### 8a. Install the Google Colab extension in VS Code
+
+Google publishes an official extension that connects a local `.ipynb` file
+directly to a real Colab-hosted GPU kernel. Install "Google Colab" from the
+VS Code Extensions panel, then to use it: open a notebook under
+`notebooks/colab_training/` → **Select Kernel** (top-right) → **Colab** →
+sign in with your Google account → **New Colab Server** → pick **GPU**
+(the free T4 tier is enough) → connect. The notebook file itself stays
+local and git-tracked as normal — only the *execution* happens on Colab's
+VM.
+
+### 8b. Auth: upload your service-account key when prompted
+
+Each training notebook's auth cell prompts a plain file-upload widget (not
+an interactive Google login, matching this project's service-account-only
+convention everywhere else) — when you run that cell, a file picker
+appears; select your `credentials/*.json` key from §3. No setup needed in
+advance.
+
+Note this uploads fresh **every Colab session** (the file lives on the
+ephemeral VM disk, not saved between sessions) — a small repeated step,
+but avoids needing to hunt for the VS Code Colab extension's Secrets UI,
+which isn't always easy to locate.
+
+### 8c. Push the training inputs Colab can't regenerate itself
+
+A couple of local build outputs need pushing to GCS once (and again after
+you relabel/rebuild them) — Colab can't produce these on its own:
+
+```
+# the hand-labeled validation sample (needed by train_unet.ipynb)
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, VALIDATION_SAMPLE_GCS_PREFIX; gcs.upload_file('data/interim/validation_sample/validation_sample_200_labeled.csv', GCS_MODEL_BUCKET, f'{VALIDATION_SAMPLE_GCS_PREFIX}.csv')"
+
+# the land-cover ensemble raster (needed by train_heat_cnn.ipynb, after
+# you've trained U-Net and run scripts/build_landcover_ensemble.py locally)
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, ENSEMBLE_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/ensemble_landcover.tif', GCS_MODEL_BUCKET, f'{ENSEMBLE_RASTER_GCS_PREFIX}.tif')"
+```
+
+### 8d. Run the notebooks, then pull the results locally
+
+Open and run `notebooks/colab_training/train_unet.ipynb` top to bottom
+(GPU-connected, per 8a). It exports/caches training patches, trains, and
+pushes the model + a training-run summary to GCS. Then, on your own
+machine:
+
+```
+python scripts/pull_models.py --model unet
+python scripts/run_landcover_unet_inference.py
+python scripts/build_landcover_ensemble.py
+```
+
+This downloads the trained weights (hash-verified), imports the run into
+your local MLflow store, runs full-Singapore CPU inference, and rebuilds
+the ensemble raster — which `train_heat_cnn.ipynb` needs (push it per §8c
+first). Then run that notebook the same way, and locally:
+
+```
+python scripts/pull_models.py --model cnn
+```
+
+Re-running any notebook later (a hyperparameter change, a relabel) is
+cheap — the GCS-cached exports mean only the first run per fingerprint pays
+for a real GEE export; everything after that is a fast download.
 
 ## Notes
 

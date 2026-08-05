@@ -32,6 +32,7 @@ models/*
 # --- MLflow local tracking store ---
 mlruns/
 mlflow.db
+mlflow_imported_runs.txt
 
 # --- Editor / OS ---
 .vscode/

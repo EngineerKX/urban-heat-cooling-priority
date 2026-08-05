@@ -60,12 +60,19 @@ GEE_PROJECT_ID = os.environ.get("GEE_PROJECT_ID", "nus-iss-urban-heat-sg")
 GEE_SERVICE_ACCOUNT = os.environ.get("GEE_SERVICE_ACCOUNT", "")
 GEE_PRIVATE_KEY_PATH = os.environ.get("GEE_PRIVATE_KEY_PATH", "")
 
-# GCS bucket used only for the U-Net TFRecord patch export/import (GEE's
+# GCS bucket used for the U-Net TFRecord patch export/import (GEE's
 # patch-export mechanism requires an async Export task to Drive or Cloud
 # Storage — there's no direct synchronous "download to local disk" for it).
-# Using GCS instead of Drive keeps this off Colab entirely; the result is
-# downloaded to data/interim/unet_patches/ right after export completes.
+# The result is downloaded to data/interim/unet_patches/ right after export
+# completes.
 GEE_EXPORT_BUCKET = os.environ.get("GEE_EXPORT_BUCKET", "")
+
+# Trained-model sync (Colab trains -> pushes here -> scripts/pull_models.py
+# downloads locally) and Colab training-run summaries both reuse the export
+# bucket under new prefixes by default — same already-configured bucket,
+# no new bucket/IAM setup needed. Override via GCS_MODEL_BUCKET only if you
+# want model artifacts on a different lifecycle policy than raw exports.
+GCS_MODEL_BUCKET = os.environ.get("GCS_MODEL_BUCKET") or GEE_EXPORT_BUCKET
 
 # ---------------------------------------------------------------------------
 # AOI
@@ -226,6 +233,26 @@ UNET_BASE_FILTERS = 32
 UNET_EARLY_STOP_PATIENCE = 5
 UNET_TRAIN_VAL_SPLIT = 0.85
 
+# Moved out of src/landcover/unet.py (now unet_model.py/unet_data.py/
+# unet_train.py/unet_infer.py) during the TF->PyTorch migration, matching
+# this file's "only place constants live" convention — CNN_MODEL_SAVE_PATH
+# below already lived here, U-Net's didn't, which was the inconsistency.
+UNET_MODEL_SAVE_PATH = MODELS_DIR / "unet_landcover.pt"
+UNET_CLASSIFIED_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover.tif"
+UNET_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover_prob.tif"
+UNET_TRAIN_PATCH_DIR = INTERIM_DIR / "unet_patches" / "train"
+UNET_INFERENCE_PATCH_DIR = INTERIM_DIR / "unet_patches" / "inference"
+
+# GCS prefixes: models/ mirrors MODELS_DIR (trained weights, source of
+# truth after Colab training); unet_train_patches/ and
+# unet_inference_patches/ mirror the GEE export prefixes already in use,
+# now doubling as a persistent cross-session cache (see
+# src/landcover/unet_data.py) since Colab's local disk is ephemeral and
+# can't rely on the old "skip if already on disk" check alone.
+UNET_MODEL_GCS_PREFIX = "models/unet_landcover"
+UNET_TRAIN_PATCHES_GCS_PREFIX = "unet_train_patches"
+UNET_INFERENCE_PATCHES_GCS_PREFIX = "unet_inference_patches"
+
 # ---------------------------------------------------------------------------
 # S5 — XGBoost + CNN predictive heat model (C2)
 # ---------------------------------------------------------------------------
@@ -234,7 +261,19 @@ XGB_MAX_DEPTH = 4
 XGB_LEARNING_RATE = 0.05
 XGB_SUBSAMPLE = 0.8
 
-CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.keras"
+CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.pt"
+CNN_MODEL_GCS_PREFIX = "models/heat_cnn"
+
+# The one CNN training input Colab can't regenerate itself (needs local
+# U-Net inference + RF combined via build_landcover_ensemble.py) — pushed
+# manually after a local ensemble build, pulled by the CNN Colab notebook.
+ENSEMBLE_RASTER_GCS_PREFIX = "training_inputs/ensemble_raster"
+
+# The hand-labeled validation sample also can't be regenerated in Colab (it
+# requires the Streamlit labeling app, a human, and the joint-labeling
+# process) — pushed manually after relabeling, pulled by train_unet.ipynb
+# to build the training region's exclusion zone.
+VALIDATION_SAMPLE_GCS_PREFIX = "training_inputs/validation_sample_200_labeled"
 
 # ---------------------------------------------------------------------------
 # MODIS LST secondary cross-check (proposal's data plan table)

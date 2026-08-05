@@ -17,7 +17,7 @@ import plotly.express as px
 import streamlit as st
 from scipy.stats import spearmanr
 
-from config.settings import DIAGNOSTICS_DIR, INTERIM_DIR, PROCESSED_DIR, VARIANT_COLUMNS
+from config.settings import CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, INTERIM_DIR, PROCESSED_DIR, VARIANT_COLUMNS
 from validation.score_validation.rank_impact import rmse_vs_heldout
 
 st.set_page_config(page_title="Validation Dashboard — Urban Heat & Cooling Priority", page_icon="✅", layout="wide")
@@ -109,12 +109,15 @@ with st.expander("S5 — XGBoost + CNN heat model (C2)", expanded=False):
     else:
         st.caption(f"`{importance_path}` not found — run `python scripts/train_heat_model_xgboost.py` first.")
 
-    canned_path = PROCESSED_DIR / "heat_model" / "canned_counterfactual_examples.json"
-    if canned_path.exists():
-        st.caption("Counterfactual cross-check examples (XGBoost vs. CNN direction agreement) are on the "
+    if CNN_MODEL_SAVE_PATH.exists():
+        st.caption("Live XGBoost-vs-CNN counterfactual cross-check (direction agreement) is on the "
                    "**Counterfactual Greening** page.")
     else:
-        st.caption(f"`{canned_path}` not found — run `python scripts/diagnose_heat_model.py` (needs WSL2 for the CNN half).")
+        st.caption(
+            "CNN heat model not trained yet — train it via `notebooks/colab_training/train_heat_cnn.ipynb`, then "
+            "`python scripts/pull_models.py --model cnn`, to enable the CNN half on the "
+            "**Counterfactual Greening** page."
+        )
 
 # --- Secondary LST cross-checks (NEA + MODIS) ---------------------------------
 with st.expander("Secondary LST cross-checks (NEA air-temp + MODIS)", expanded=False):

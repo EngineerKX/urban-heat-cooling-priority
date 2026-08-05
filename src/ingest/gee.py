@@ -16,6 +16,7 @@ from config.settings import (
     GEE_PROJECT_ID,
     GEE_SERVICE_ACCOUNT,
 )
+from src.utils.gcs import download_blob, download_blobs_with_prefix
 
 _initialized = False
 
@@ -38,23 +39,6 @@ def init_ee(force: bool = False) -> None:
     ee.Initialize(credentials, project=GEE_PROJECT_ID)
     _initialized = True
     print(f"EE initialized OK (service account), project: {GEE_PROJECT_ID}")
-
-
-def _gcs_client():
-    """Cloud Storage client, authenticated with the SAME service-account key
-    already configured for Earth Engine. `google-cloud-storage` is a
-    separate credential system from `ee` and does not reuse `init_ee()`'s
-    credentials automatically — left to its default behavior, it looks for
-    Application Default Credentials (only present if you've separately run
-    `gcloud auth application-default login`), which nothing in this project
-    sets up. Passing the service-account file explicitly avoids that
-    dependency entirely.
-    """
-    from google.cloud import storage
-    from google.oauth2 import service_account
-
-    credentials = service_account.Credentials.from_service_account_file(GEE_PRIVATE_KEY_PATH)
-    return storage.Client(project=GEE_PROJECT_ID, credentials=credentials)
 
 
 def date_filter_for_years_months(collection, years, months):
@@ -223,20 +207,9 @@ def export_patches_to_gcs(image, description: str, bucket: str, prefix: str, reg
         raise RuntimeError(f"Patch export did not complete: {status}")
     print("✅ Export completed — downloading blobs locally.")
 
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    client = _gcs_client()
-    blobs = list(client.list_blobs(bucket, prefix=prefix))
-    for blob in blobs:
-        local_path = out_dir / Path(blob.name).name
-        # blob.download_to_filename() also calls os.utime() afterward to
-        # match the blob's cloud mtime — unsupported on WSL2's Windows-
-        # mounted filesystem (/mnt/c/...), which raises PermissionError.
-        # download_to_file() writes the same bytes without that step.
-        with open(local_path, "wb") as f:
-            client.download_blob_to_file(blob, f)
-    print(f"Downloaded {len(blobs)} file(s) to {out_dir}")
-    return out_dir
+    downloaded = download_blobs_with_prefix(bucket, prefix, out_dir)
+    print(f"Downloaded {len(downloaded)} file(s) to {out_dir}")
+    return Path(out_dir)
 
 
 def download_small_image(image, region, scale: int, crs: str, out_path, bands=None) -> "Path":
@@ -314,15 +287,7 @@ def export_geotiff_to_gcs(image, description: str, bucket: str, prefix: str, reg
     if status["state"] != "COMPLETED":
         raise RuntimeError(f"Raster export did not complete: {status}")
 
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    client = _gcs_client()
-    blob = client.bucket(bucket).blob(f"{prefix}.tif")
-    # See the matching note in export_patches_to_gcs — download_to_file()
-    # avoids the os.utime() call that download_to_filename() makes, which
-    # fails with PermissionError on WSL2's Windows-mounted filesystem.
-    with open(out_path, "wb") as f:
-        client.download_blob_to_file(blob, f)
+    out_path = download_blob(bucket, f"{prefix}.tif", out_path)
     print(f"✅ Downloaded raster -> {out_path}")
     return out_path
 

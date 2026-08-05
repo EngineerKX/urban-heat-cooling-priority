@@ -25,23 +25,25 @@ N_CLASSES = 4  # vegetation=1, built_up=2, bare=3, water=4
 
 def _make_synthetic_patch_batch():
     """1 patch, 2x2 pixels, 2 spectral bands + 4 one-hot land-cover
-    channels. (0,0) and (1,0) are vegetation; (0,1) and (1,1) are
+    channels, channels-first (n, C, H, W) -- matches
+    cnn_data.build_local_feature_target_patches's layout post-PyTorch-
+    migration. (0,0) and (1,0) are vegetation; (0,1) and (1,1) are
     built_up. No bare/water pixels at all -- exercises the "no pixels for
     this class" branch too."""
-    X = np.zeros((1, 2, 2, len(FEATURE_BANDS) + N_CLASSES), dtype=np.float32)
+    X = np.zeros((1, len(FEATURE_BANDS) + N_CLASSES, 2, 2), dtype=np.float32)
     n_bands = len(FEATURE_BANDS)
 
-    X[0, 0, 0, :n_bands] = [10.0, 20.0]
-    X[0, 0, 0, n_bands:] = [1, 0, 0, 0]  # vegetation
+    X[0, :n_bands, 0, 0] = [10.0, 20.0]
+    X[0, n_bands:, 0, 0] = [1, 0, 0, 0]  # vegetation
 
-    X[0, 0, 1, :n_bands] = [30.0, 40.0]
-    X[0, 0, 1, n_bands:] = [0, 1, 0, 0]  # built_up
+    X[0, :n_bands, 0, 1] = [30.0, 40.0]
+    X[0, n_bands:, 0, 1] = [0, 1, 0, 0]  # built_up
 
-    X[0, 1, 0, :n_bands] = [12.0, 22.0]
-    X[0, 1, 0, n_bands:] = [1, 0, 0, 0]  # vegetation
+    X[0, :n_bands, 1, 0] = [12.0, 22.0]
+    X[0, n_bands:, 1, 0] = [1, 0, 0, 0]  # vegetation
 
-    X[0, 1, 1, :n_bands] = [32.0, 42.0]
-    X[0, 1, 1, n_bands:] = [0, 1, 0, 0]  # built_up
+    X[0, :n_bands, 1, 1] = [32.0, 42.0]
+    X[0, n_bands:, 1, 1] = [0, 1, 0, 0]  # built_up
 
     return X
 
@@ -60,7 +62,7 @@ def test_class_mean_feature_vectors():
 def test_apply_patch_counterfactual_edits_only_masked_pixels():
     X = _make_synthetic_patch_batch()
     means = class_mean_feature_vectors(X, feature_bands=FEATURE_BANDS, n_landcover_classes=N_CLASSES)
-    patch_X = X[0]  # (2, 2, 6)
+    patch_X = X[0]  # (6, 2, 2), channels-first
 
     edit_mask = np.zeros((2, 2), dtype=bool)
     edit_mask[1, 1] = True  # convert the bottom-right built_up pixel to vegetation
@@ -71,13 +73,13 @@ def test_apply_patch_counterfactual_edits_only_masked_pixels():
     )
 
     n_bands = len(FEATURE_BANDS)
-    assert np.allclose(edited[1, 1, :n_bands], means[1]), "edited pixel's spectral bands should be class 1's mean vector"
-    assert np.allclose(edited[1, 1, n_bands:], [1, 0, 0, 0]), "edited pixel's one-hot should be a clean class-1 one-hot"
+    assert np.allclose(edited[:n_bands, 1, 1], means[1]), "edited pixel's spectral bands should be class 1's mean vector"
+    assert np.allclose(edited[n_bands:, 1, 1], [1, 0, 0, 0]), "edited pixel's one-hot should be a clean class-1 one-hot"
 
     for r, c in [(0, 0), (0, 1), (1, 0)]:
-        assert np.allclose(edited[r, c], patch_X[r, c]), f"unedited pixel ({r},{c}) must be unchanged"
+        assert np.allclose(edited[:, r, c], patch_X[:, r, c]), f"unedited pixel ({r},{c}) must be unchanged"
 
-    assert np.allclose(patch_X[1, 1, n_bands:], [0, 1, 0, 0]), "original patch_X must not be mutated in place"
+    assert np.allclose(patch_X[n_bands:, 1, 1], [0, 1, 0, 0]), "original patch_X must not be mutated in place"
     print("PASS: apply_patch_counterfactual edits only masked pixels and leaves the original array untouched")
 
 

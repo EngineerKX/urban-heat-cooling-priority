@@ -18,23 +18,25 @@ side-by-side as a cross-model sanity check instead.
 import numpy as np
 
 from config.settings import ALL_FEATURE_BANDS
-from src.heat_model.cnn_patches import N_LANDCOVER_CLASSES
+from src.heat_model.cnn_model import N_LANDCOVER_CLASSES
 
 
 def class_mean_feature_vectors(X, valid_mask=None, feature_bands=ALL_FEATURE_BANDS,
                                 n_landcover_classes=N_LANDCOVER_CLASSES) -> dict:
-    """Global (all-patches) mean spectral+index feature vector per
-    land-cover bucket id (1..n_landcover_classes), computed only over
-    pixels genuinely belonging to that class (and, if given, valid_mask).
+    """`X`: (n_patches, len(feature_bands)+n_landcover_classes, H, W),
+    channels-first (matches `cnn_data.build_local_feature_target_patches`).
+    Global (all-patches) mean spectral+index feature vector per land-cover
+    bucket id (1..n_landcover_classes), computed only over pixels genuinely
+    belonging to that class (and, if given, valid_mask).
     Returns {class_id: np.ndarray(len(feature_bands),)}."""
     n_bands = len(feature_bands)
-    spectral = X[..., :n_bands]
-    onehot = X[..., n_bands:n_bands + n_landcover_classes]
+    spectral = np.moveaxis(X[:, :n_bands], 1, -1)  # (n, H, W, n_bands) for the mask-indexing below
+    onehot = X[:, n_bands:n_bands + n_landcover_classes]  # (n, n_landcover_classes, H, W)
 
     means = {}
     for class_idx in range(n_landcover_classes):
         class_id = class_idx + 1  # bucket ids are 1-indexed
-        class_pixel_mask = onehot[..., class_idx] > 0.5
+        class_pixel_mask = onehot[:, class_idx] > 0.5  # (n, H, W)
         if valid_mask is not None:
             class_pixel_mask = class_pixel_mask & valid_mask
         n_pixels = int(class_pixel_mask.sum())
@@ -49,18 +51,18 @@ def class_mean_feature_vectors(X, valid_mask=None, feature_bands=ALL_FEATURE_BAN
 
 def apply_patch_counterfactual(patch_X, edit_mask, target_class: int, class_mean_vectors: dict,
                                 feature_bands=ALL_FEATURE_BANDS, n_landcover_classes=N_LANDCOVER_CLASSES):
-    """`patch_X`: single patch, (H, W, len(feature_bands)+n_landcover_classes).
-    `edit_mask`: (H, W) bool, pixels to convert to `target_class` (a bucket
-    id, 1..n_landcover_classes). Returns a NEW array -- patch_X is not
-    modified in place."""
+    """`patch_X`: single patch, (len(feature_bands)+n_landcover_classes, H, W),
+    channels-first. `edit_mask`: (H, W) bool, pixels to convert to
+    `target_class` (a bucket id, 1..n_landcover_classes). Returns a NEW
+    array -- patch_X is not modified in place."""
     n_bands = len(feature_bands)
     edited = patch_X.copy()
 
-    edited[edit_mask, :n_bands] = class_mean_vectors[target_class]
+    edited[:n_bands][:, edit_mask] = class_mean_vectors[target_class][:, np.newaxis]
 
     onehot = np.zeros(n_landcover_classes, dtype=np.float32)
     onehot[target_class - 1] = 1.0
-    edited[edit_mask, n_bands:n_bands + n_landcover_classes] = onehot
+    edited[n_bands:n_bands + n_landcover_classes][:, edit_mask] = onehot[:, np.newaxis]
 
     return edited
 
@@ -68,10 +70,12 @@ def apply_patch_counterfactual(patch_X, edit_mask, target_class: int, class_mean
 def run_patch_counterfactual(model, patch_X, edit_mask, target_class: int, class_mean_vectors: dict) -> dict:
     """Runs the CNN on the original and edited patch, returns full per-
     pixel delta plus the mean delta within the edited area."""
+    from src.heat_model.cnn_infer import predict_patch
+
     edited_X = apply_patch_counterfactual(patch_X, edit_mask, target_class, class_mean_vectors)
 
-    original_pred = model.predict(patch_X[np.newaxis, ...], verbose=0)[0, ..., 0]
-    edited_pred = model.predict(edited_X[np.newaxis, ...], verbose=0)[0, ..., 0]
+    original_pred = predict_patch(model, patch_X)
+    edited_pred = predict_patch(model, edited_X)
     delta = edited_pred - original_pred
 
     return {

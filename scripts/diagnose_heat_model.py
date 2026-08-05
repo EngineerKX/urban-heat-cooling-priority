@@ -2,10 +2,11 @@
 """Read-only diagnostic for S5 (C2): recomputes the XGBoost test metrics,
 and -- if the CNN model exists -- runs both counterfactual paths on a
 handful of real high-priority subzones and checks they agree on
-direction. The saved examples double as the canned-example library
-app/pages/4_Counterfactual_Greening.py loads for its CNN patch-level demo
-(native Windows can't run the CNN live -- see the Windows/WSL2 split noted
-in docs/MASTER_PROMPT). Same "build vs. diagnose" split as
+direction. The saved examples double as a reference/fallback example
+library for app/pages/4_Counterfactual_Greening.py (which now also runs
+the CNN live via PyTorch CPU inference -- these precomputed examples are
+kept as a known-good reference, not a workaround for a broken model
+anymore). Same "build vs. diagnose" split as
 scripts/diagnose_heat_variants.py; deliberately does NOT import from
 scripts/run_counterfactual.py (this repo's scripts/ has no __init__.py --
 scripts import from src/config/validation only, not from each other).
@@ -90,14 +91,13 @@ def main():
 
     cnn_available = CNN_MODEL_SAVE_PATH.exists() and MIXER_JSON_PATH.exists() and LST_BICUBIC10_PATH.exists()
     print(f"\nCNN model available: {cnn_available}"
-          + ("" if cnn_available else " — run scripts/train_heat_model_cnn.py (WSL2) to enable patch-level examples."))
+          + ("" if cnn_available else " — train it via notebooks/colab_training/train_heat_cnn.ipynb, then `python scripts/pull_models.py --model cnn`."))
 
     subzones_gdf = as_geodataframe(fetch_subzones_geojson())
 
     if cnn_available:
-        import tensorflow as tf
-
-        from src.heat_model.cnn_patches import build_local_feature_target_patches, locate_patch_and_pixel
+        from src.heat_model.cnn_data import build_local_feature_target_patches
+        from src.heat_model.cnn_infer import load_cnn_regressor, locate_patch_and_pixel
         from src.heat_model.counterfactual import class_mean_feature_vectors, rescale_subzone_delta, run_patch_counterfactual
 
         print("\nBuilding local feature/target patches for the demo examples ...")
@@ -105,7 +105,7 @@ def main():
             INFERENCE_PATCH_DIR, MIXER_JSON_PATH, ENSEMBLE_RASTER_PATH, LST_BICUBIC10_PATH,
         )
         class_means = class_mean_feature_vectors(X, valid_mask=valid_mask)
-        cnn_model = tf.keras.models.load_model(CNN_MODEL_SAVE_PATH)
+        cnn_model = load_cnn_regressor(CNN_MODEL_SAVE_PATH)
         subzones_gdf_utm = subzones_gdf.to_crs(S2_UTM_CRS)
 
     examples = []

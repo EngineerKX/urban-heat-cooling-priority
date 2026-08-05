@@ -7,8 +7,9 @@ combined model:
 - Subzone-level (XGBoost): --subzone-id + --delta-vegetation. Always runs
   if the XGBoost model exists.
 - Patch-level (CNN): additionally pass --lon/--lat/--radius-m to edit a
-  real 10m patch around that point. Requires the CNN model
-  (scripts/train_heat_model_cnn.py, WSL2-only) -- skipped with a printed
+  real 10m patch around that point. Requires the CNN model (trained via
+  notebooks/colab_training/train_heat_cnn.ipynb, pulled locally with
+  `python scripts/pull_models.py --model cnn`) -- skipped with a printed
   note if it doesn't exist, rather than failing the whole query.
 
 No --force flag -- this is a query tool, not a build-once cache (same
@@ -83,15 +84,15 @@ def run_xgb_counterfactual(subzone_id: str, delta_fraction_vegetation: float):
 
 
 def run_cnn_counterfactual(subzone_id: str, lon: float, lat: float, radius_m: float, target_class_name: str):
-    import tensorflow as tf
-
     from config.settings import UNET_PATCH_SIZE
-    from src.heat_model.cnn_patches import build_local_feature_target_patches, locate_patch_and_pixel
+    from src.heat_model.cnn_data import build_local_feature_target_patches
+    from src.heat_model.cnn_infer import load_cnn_regressor, locate_patch_and_pixel
     from src.heat_model.counterfactual import class_mean_feature_vectors, rescale_subzone_delta, run_patch_counterfactual
     from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
 
     if not CNN_MODEL_SAVE_PATH.exists():
-        print(f"⚠️  {CNN_MODEL_SAVE_PATH} not found — run scripts/train_heat_model_cnn.py (WSL2) first. Skipping patch-level counterfactual.")
+        print(f"⚠️  {CNN_MODEL_SAVE_PATH} not found — train it via notebooks/colab_training/train_heat_cnn.ipynb, "
+              "then `python scripts/pull_models.py --model cnn`. Skipping patch-level counterfactual.")
         return None
 
     inference_patch_dir = INTERIM_DIR / "unet_patches" / "inference"
@@ -121,7 +122,7 @@ def run_cnn_counterfactual(subzone_id: str, lon: float, lat: float, radius_m: fl
     yy, xx = np.mgrid[0:UNET_PATCH_SIZE, 0:UNET_PATCH_SIZE]
     edit_mask = ((yy - local_row) ** 2 + (xx - local_col) ** 2) <= radius_px ** 2
 
-    model = tf.keras.models.load_model(CNN_MODEL_SAVE_PATH)
+    model = load_cnn_regressor(CNN_MODEL_SAVE_PATH)
     result = run_patch_counterfactual(model, X[patch_idx], edit_mask, target_class, class_means)
 
     edit_area_m2 = result["n_edited_pixels"] * (TARGET_SCALE_M ** 2)

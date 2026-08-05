@@ -1,0 +1,31 @@
+# Trimmed requirements for Colab training sessions
+# (notebooks/colab_training/train_unet.ipynb, train_heat_cnn.ipynb).
+# Installed fresh each ephemeral Colab session, so kept minimal for a fast
+# `pip install` -- not a copy of requirements.txt.
+#
+# Deliberately EXCLUDES:
+#   - torch: Colab ships a pre-installed, CUDA-matched torch build already.
+#     Installing the local CPU-only pin from requirements.txt here risks
+#     silently replacing it with a mismatched wheel and losing GPU accel --
+#     the one thing training in Colab is for.
+#   - tensorflow: this project no longer uses it at all (see the
+#     TensorFlow->PyTorch migration) -- never needed here either.
+#   - app-only packages (streamlit, streamlit-folium, folium, plotly,
+#     altair, pydeck, watchdog, GitPython, gitdb) and non-DL packages
+#     (xgboost, scikit-learn) that the Streamlit app / RF+XGBoost need but
+#     these training notebooks never touch.
+
+earthengine-api==1.7.36
+google-cloud-storage==3.13.0
+google-auth==2.56.2
+python-dotenv==1.2.2
+rasterio==1.5.0
+geopandas==1.1.4
+pyproj==3.7.2
+shapely==2.1.2
+affine==2.4.0
+numpy==2.5.1
+mlflow
+tfrecord==1.14.6
+crc32c==2.8
+requests==2.34.2
