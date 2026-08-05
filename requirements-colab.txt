@@ -14,18 +14,26 @@
 #     altair, pydeck, watchdog, GitPython, gitdb) and non-DL packages
 #     (xgboost, scikit-learn) that the Streamlit app / RF+XGBoost need but
 #     these training notebooks never touch.
+#   - version pins on numpy/requests/google-auth: Colab's base image
+#     ships these pre-installed at versions its own `google-colab` package
+#     (which the auth cell's google.colab.files.upload() call depends on)
+#     explicitly requires. Forcing our locally-pinned versions here
+#     overwrites them and risks breaking that call -- confirmed via a real
+#     pip dependency-conflict warning during an actual Colab run
+#     (2026-08-05). Left unpinned so pip only touches them if some other
+#     package in this list truly needs a newer one.
 
 earthengine-api==1.7.36
 google-cloud-storage==3.13.0
-google-auth==2.56.2
+google-auth
 python-dotenv==1.2.2
 rasterio==1.5.0
 geopandas==1.1.4
 pyproj==3.7.2
 shapely==2.1.2
 affine==2.4.0
-numpy==2.5.1
+numpy
 mlflow
 tfrecord==1.14.6
 crc32c==2.8
-requests==2.34.2
+requests

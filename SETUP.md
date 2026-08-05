@@ -202,18 +202,27 @@ sign in with your Google account → **New Colab Server** → pick **GPU**
 local and git-tracked as normal — only the *execution* happens on Colab's
 VM.
 
-### 8b. Auth: upload your service-account key when prompted
+### 8b. Auth: paste your service-account key when prompted
 
-Each training notebook's auth cell prompts a plain file-upload widget (not
-an interactive Google login, matching this project's service-account-only
-convention everywhere else) — when you run that cell, a file picker
-appears; select your `credentials/*.json` key from §3. No setup needed in
-advance.
+Each training notebook's auth cell prompts a masked paste-in box (via
+`getpass`, standard Jupyter stdin — not an interactive Google login,
+matching this project's service-account-only convention everywhere else).
+When you run that cell: open your `credentials/*.json` key from §3 in a
+text editor, copy the whole contents, paste into the box that appears,
+press Enter. No setup needed in advance.
 
-Note this uploads fresh **every Colab session** (the file lives on the
-ephemeral VM disk, not saved between sessions) — a small repeated step,
-but avoids needing to hunt for the VS Code Colab extension's Secrets UI,
-which isn't always easy to locate.
+Two other approaches were tried and don't work through VS Code's
+remote-kernel connection to a Colab runtime — `google.colab.files.upload()`
+hangs indefinitely (it depends on a JS/widget bridge specific to Colab's
+own web frontend, which VS Code's notebook renderer doesn't implement),
+and the Colab extension's Secrets UI wasn't reliably locatable. `getpass`
+only depends on the standard Jupyter stdin protocol, so it works reliably
+regardless of frontend — confirmed via a real successful training run,
+2026-08-05.
+
+Note you'll paste this fresh **every Colab session** (the file lives on
+the ephemeral VM disk, not saved between sessions) — a small repeated
+step, but a reliable one.
 
 ### 8c. Push the training inputs Colab can't regenerate itself
 
