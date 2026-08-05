@@ -137,11 +137,19 @@ GEE_SERVICE_ACCOUNT=<service-account-email>@<project-id>.iam.gserviceaccount.com
 GEE_PRIVATE_KEY_PATH=<full local path to the .json key you downloaded>
 GEE_PROJECT_ID=<project-id>
 GEE_EXPORT_BUCKET=
+GCS_MODEL_BUCKET=
 ```
 
 `GEE_EXPORT_BUCKET` can stay blank for now — it's only needed later for
 U-Net training / exporting the Random Forest land-cover raster (see
 §7 below). Everything else requires the first three.
+
+`GCS_MODEL_BUCKET` can also stay blank — it's for trained-model sync
+(`scripts/pull_models.py`/`push_models.py`, §9 below) and Colab
+training-run summaries. Leaving it unset makes it default to reusing
+whatever you set `GEE_EXPORT_BUCKET` to, which is fine at this project's
+scale — only set it separately if you specifically want model artifacts
+on a different bucket/lifecycle policy than raw GEE exports.
 
 **Never commit `.env`** — it's already gitignored, but always worth a
 second glance before pushing.
@@ -178,20 +186,75 @@ then.
 ## 7. Optional: Cloud Storage bucket
 
 Needed once you get to the Random Forest raster export in
-`scripts/train_landcover_rf.py`, or anything U-Net/CNN-related (patch
-export, training, model sync — see §8 below). Create a bucket in the same
+`scripts/train_landcover_rf.py` (§8 below), or anything U-Net/CNN-related
+(patch export, training, model sync — §9 below). Create a bucket in the same
 GCP project (Cloud Storage → Buckets → Create), then set `GEE_EXPORT_BUCKET`
 in `.env` to its name. The same bucket doubles as the model-artifact sync
 target (`GCS_MODEL_BUCKET`, defaults to reusing this one — see `.env.example`).
 
-## 8. Training deep-learning models (Colab)
+## 8. Land-cover baseline: Random Forest
+
+Before touching U-Net/CNN at all, the Random Forest classifier needs to
+exist locally — it's a hard prerequisite for the land-cover ensemble
+(§9d below combines RF's + U-Net's probability rasters), and it's
+simpler to get running first since it needs no GPU, no Colab, and trains
+server-side on Earth Engine in a couple of minutes.
+
+### 8a. Prerequisite: a hand-labeled validation sample
+
+Both RF and U-Net need `data/interim/validation_sample/validation_sample_200_labeled.csv`
+to exist before they'll train — it defines both the accuracy scoring
+ground truth *and* the spatial exclusion zone (so training never sees
+the points it'll later be scored against). If that file doesn't exist
+yet on your machine:
+
+1. Generate the (unlabeled) stratified sample:
+   ```
+   .venv\Scripts\python.exe scripts\generate_validation_sample.py
+   ```
+2. Label it by hand via the Streamlit labeling page:
+   ```
+   streamlit run app/Home.py
+   ```
+   then navigate to **Label Validation Points** in the sidebar and work
+   through all 200 points, picking one of the 4 bucket classes
+   (vegetation / built_up / bare / water) for each.
+3. If you're joining a project where a teammate already has a labeled
+   sample, it's simplest to just ask them for their
+   `validation_sample_200_labeled.csv` directly (it's gitignored, so it
+   never came across in the clone) rather than relabeling 200 points
+   from scratch yourself.
+
+### 8b. Train RF and classify all of Singapore
+
+```
+.venv\Scripts\python.exe scripts\train_landcover_rf.py --with-probabilities
+```
+
+`--with-probabilities` is required here specifically because the
+ensemble step (§9d) needs RF's per-class probability raster, not just
+its hard classified labels — without this flag you'd only get the
+classified raster and the ensemble build would fail with a missing-file
+error later. This step needs `GEE_EXPORT_BUCKET` set (§7) since it
+exports the classified/probability rasters via Cloud Storage. Takes a
+few minutes — training happens server-side on Earth Engine (`ee.Classifier`),
+not on your machine, so no GPU or heavy local compute either.
+
+Other useful flags: `--no-asset-cache` forces retraining instead of
+reusing a cached GEE classifier asset from a previous run.
+
+**Verify it worked**: you should see
+`data/processed/landcover/rf_landcover.tif` (classified) and
+`rf_landcover_prob.tif` (per-class probabilities) afterward.
+
+## 9. Training deep-learning models (Colab)
 
 U-Net (land-cover) and the CNN heat model both train exclusively on Google
 Colab's free GPU — **never locally**, no GPU or WSL2 needed on your machine
 at all. Local machines only ever run inference on the trained weights
 (CPU is plenty).
 
-### 8a. Install the Google Colab extension in VS Code
+### 9a. Install the Google Colab extension in VS Code
 
 Google publishes an official extension that connects a local `.ipynb` file
 directly to a real Colab-hosted GPU kernel. Install "Google Colab" from the
@@ -202,7 +265,7 @@ sign in with your Google account → **New Colab Server** → pick **GPU**
 local and git-tracked as normal — only the *execution* happens on Colab's
 VM.
 
-### 8b. Auth: paste your service-account key when prompted
+### 9b. Auth: paste your service-account key when prompted
 
 Each training notebook's auth cell prompts a masked paste-in box (via
 `getpass`, standard Jupyter stdin — not an interactive Google login,
@@ -224,7 +287,7 @@ Note you'll paste this fresh **every Colab session** (the file lives on
 the ephemeral VM disk, not saved between sessions) — a small repeated
 step, but a reliable one.
 
-### 8c. Push the training inputs Colab can't regenerate itself
+### 9c. Push the training inputs Colab can't regenerate itself
 
 A couple of local build outputs need pushing to GCS once (and again after
 you relabel/rebuild them) — Colab can't produce these on its own:
@@ -238,10 +301,10 @@ python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCK
 python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, ENSEMBLE_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/ensemble_landcover.tif', GCS_MODEL_BUCKET, f'{ENSEMBLE_RASTER_GCS_PREFIX}.tif')"
 ```
 
-### 8d. Run the notebooks, then pull the results locally
+### 9d. Run the notebooks, then pull the results locally
 
 Open and run `notebooks/colab_training/train_unet.ipynb` top to bottom
-(GPU-connected, per 8a). It exports/caches training patches, trains, and
+(GPU-connected, per 9a). It exports/caches training patches, trains, and
 pushes the model + a training-run summary to GCS. Then, on your own
 machine:
 
@@ -253,7 +316,7 @@ python scripts/build_landcover_ensemble.py
 
 This downloads the trained weights (hash-verified), imports the run into
 your local MLflow store, runs full-Singapore CPU inference, and rebuilds
-the ensemble raster — which `train_heat_cnn.ipynb` needs (push it per §8c
+the ensemble raster — which `train_heat_cnn.ipynb` needs (push it per §9c
 first). Then run that notebook the same way, and locally:
 
 ```
@@ -263,6 +326,59 @@ python scripts/pull_models.py --model cnn
 Re-running any notebook later (a hyperparameter change, a relabel) is
 cheap — the GCS-cached exports mean only the first run per fingerprint pays
 for a real GEE export; everything after that is a fast download.
+
+**Gotcha: retraining in the same Colab session silently no-ops.** Both
+`train_unet()` and `train_cnn_regressor()` default to `force_retrain=False`
+— if a cached model already exists (matching training-data fingerprint)
+at `models/unet_landcover.pt` / `models/heat_cnn.pt` *on that Colab VM's
+own disk*, the training cell just reloads it instead of actually
+retraining. This is harmless on a genuinely fresh VM (nothing cached
+yet), but if you **reconnect to or stay on the same Colab session** you
+used for an earlier run and want to force a real new training pass
+(e.g. to compare against a previous result, or because you changed a
+hyperparameter in `config/settings.py` that isn't part of the
+fingerprint), you must explicitly edit the training cell to pass
+`force_retrain=True` before re-running it — otherwise `push_models.py`
+will also silently no-op afterward (same weights → same hash → "already
+matches, skipping"), and you'll be looking at last run's numbers without
+realizing nothing new actually happened. Safest sign something's wrong:
+if GCS's `models/unet_landcover.pt` timestamp doesn't change after a
+"finished" training run, this is almost certainly why — check with:
+```
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET; c = gcs.get_client(); print([b.updated for b in c.list_blobs(GCS_MODEL_BUCKET, prefix='models/unet_landcover.pt')])"
+```
+
+**Browsing tracked training runs**: every `pull_models.py` call imports
+any new Colab run summaries into your local MLflow store alongside
+RF/XGBoost's own tracked runs. To browse them:
+```
+.venv\Scripts\python.exe -m mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+then open the URL it prints (defaults to `http://127.0.0.1:5000`) in a
+browser. Useful for comparing loss/accuracy curves across multiple
+retrains without manually re-reading printed epoch logs.
+
+## 10. Run the app
+
+Once at least the land-cover classifiers exist (§8, and ideally §9 for
+live CNN counterfactuals — the app degrades gracefully with a "not
+trained yet" message on any page whose model/raster inputs are missing,
+rather than crashing), launch the full Streamlit deliverable:
+
+```
+streamlit run app/Home.py
+```
+
+Opens in your browser (defaults to `http://localhost:8501`). Pages, in
+sidebar order: **Label Validation Points** (the labeling tool from
+§8a), **Island Map** (choropleth of the cooling-priority score),
+**Subzone Breakdown** (per-subzone pillar detail), **Counterfactual
+Greening** (live XGBoost + CNN "what if we greened this area"
+simulator — see §9 for what the CNN half needs to be live rather than
+showing its fallback message), **Validation Dashboard** (every
+validated output already on disk — Week-1 gates, classifier evaluation
+metrics, hotspot cluster quality, S5/S6 diagnostics, LST cross-checks —
+in one place).
 
 ## Notes
 
