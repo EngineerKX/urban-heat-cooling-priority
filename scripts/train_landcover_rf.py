@@ -47,7 +47,7 @@ from src.landcover.rf_baseline import (
     informal_accuracy_check,
     train_rf_classifier,
 )
-from src.utils.experiment_tracking import start_run
+from src.utils.experiment_tracking import log_artifact_safe, start_run
 
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"
 
@@ -108,13 +108,13 @@ def main(use_asset_cache: bool = True, with_probabilities: bool = False):
 
         mlflow.log_metric("informal_accuracy", accuracy)
         mlflow.log_metric("n_scored", int(crosstab.values.sum()))
-        mlflow.log_artifact(str(RF_RASTER_PATH))
+        log_artifact_safe(RF_RASTER_PATH)
 
         if with_probabilities:
             prob_image = classify_probability(feature_image, classifier, boundary, valid_mask)
             export_classified_raster(prob_image, boundary, out_path=RF_PROB_RASTER_PATH)
             print(f"Probability raster: {RF_PROB_RASTER_PATH}")
-            mlflow.log_artifact(str(RF_PROB_RASTER_PATH))
+            log_artifact_safe(RF_PROB_RASTER_PATH)
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ from src.heat_model.tabular import (
     fit_ndvi_vegetation_slope,
     train_xgb_model,
 )
-from src.utils.experiment_tracking import HEAT_MODEL_EXPERIMENT_NAME, start_run
+from src.utils.experiment_tracking import HEAT_MODEL_EXPERIMENT_NAME, log_artifact_safe, start_run
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 HOTSPOT_CLUSTERS_CSV_PATH = PROCESSED_DIR / "hotspot_clusters.csv"
@@ -87,7 +87,7 @@ def main(force_retrain: bool = False):
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         with open(MODEL_OUT_PATH, "wb") as f:
             pickle.dump(model, f)
-        mlflow.log_artifact(str(MODEL_OUT_PATH))
+        log_artifact_safe(MODEL_OUT_PATH)
 
         df[["subzone_id", XGB_TARGET_COLUMN, "lst_predicted", "residual"]].rename(
             columns={XGB_TARGET_COLUMN: "lst_actual"}

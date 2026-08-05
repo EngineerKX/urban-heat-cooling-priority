@@ -45,6 +45,30 @@ def start_run(model_name: str, experiment_name: str = EXPERIMENT_NAME, **tags):
     return mlflow.start_run(run_name=model_name, tags={"model_type": model_name, **tags})
 
 
+def log_artifact_safe(local_path) -> None:
+    """`mlflow.log_artifact()` given an absolute Windows path (drive letter
+    + colon, e.g. `C:\\Users\\...`) has a real, confirmed bug on this
+    platform: some version in this project's dependency chain misreads the
+    drive letter as a URI scheme and recreates the ENTIRE absolute path as
+    nested folders inside the artifact store instead of just copying the
+    file in -- caught the hard way (2026-08-06): a ~23MB model file ended
+    up buried under a literal (Unicode-substituted, since NTFS forbids a
+    real ':' in a filename) "C:" folder sitting at the repo root instead of
+    inside `mlruns/`. Sidestepped entirely by cd-ing into the file's own
+    directory and logging just its basename, so `mlflow.log_artifact()`
+    never sees a drive-letter path in the first place. Use this instead of
+    calling `mlflow.log_artifact()` directly with any absolute path."""
+    import os
+
+    local_path = Path(local_path)
+    old_cwd = os.getcwd()
+    os.chdir(local_path.parent)
+    try:
+        mlflow.log_artifact(local_path.name)
+    finally:
+        os.chdir(old_cwd)
+
+
 def export_run_summary(run_name: str, experiment_name: str, params: dict, metrics_history: dict,
                         tags: dict | None = None) -> dict:
     """Build the JSON-able summary a Colab notebook uploads to GCS after
