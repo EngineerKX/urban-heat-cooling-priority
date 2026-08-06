@@ -13,12 +13,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import mlflow
 import pandas as pd
 
 from config.settings import INTERIM_DIR
 from config.settings import UNET_CLASSIFIED_RASTER_PATH as UNET_RASTER_PATH
 from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
 from src.landcover.rf_baseline import RF_RASTER_PATH
+from src.utils.experiment_tracking import EXPERIMENT_NAME, start_run
 from validation.landcover_validation.classifier_evaluation import (
     compare_classifiers,
     evaluate_classifier,
@@ -58,6 +60,25 @@ def main():
     print("\n" + comparison_df.to_string(index=False))
 
     save_evaluation_outputs(results, comparison_df)
+
+    # One MLflow run per model (rf/unet/ensemble), tagged stage="evaluation"
+    # so they're distinguishable from the training runs of the same name --
+    # this is the formal accuracy/macro-F1/per-class-F1 numbers, previously
+    # only ever manually copied into backup SUMMARY.txt files, now a
+    # permanent, comparable record across every rerun.
+    for model_name, result in results.items():
+        with start_run(f"evaluate_{model_name}", experiment_name=EXPERIMENT_NAME,
+                        stage="evaluation", evaluated_model=model_name):
+            mlflow.log_param("n_validation_points", len(validation_df))
+            mlflow.log_metric("accuracy", result["accuracy"])
+            mlflow.log_metric("macro_f1", result["macro_f1"])
+            mlflow.log_metric("weighted_f1", result["weighted_f1"])
+            mlflow.log_metric("n_scored", result["n_scored"])
+            per_class_f1 = result["per_class_metrics"].set_index("class")["f1"]
+            for cls_name, f1 in per_class_f1.items():
+                mlflow.log_metric(f"{cls_name}_f1", f1)
+    print("Logged evaluation results to MLflow (one run per model, tag stage=evaluation).")
+
     return comparison_df
 
 

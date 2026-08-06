@@ -40,8 +40,11 @@ def train_loop(
     (i.e. built with `reduction="none"`) broadcastable against `weight` —
     the weighted mean `(loss * weight).sum() / weight.sum()` is computed
     here, uniformly for both classification and regression. `metric_fn(pred,
-    target, weight)` returns a single float, printed per epoch (e.g.
-    weighted accuracy or weighted RMSE) but not used for early stopping.
+    target, weight)` returns a single float (e.g. weighted accuracy or
+    weighted RMSE), computed on both train and val batches each epoch (the
+    train-set one is a cheap by-product of the forward pass already needed
+    for the loss, not an extra pass) — printed and returned in `history`,
+    but not used for early stopping.
 
     Early stopping + "restore_best_weights" both track `val_loss`: training
     stops once `patience` epochs pass with no improvement, and the model's
@@ -51,14 +54,14 @@ def train_loop(
     device = device or default_device()
     model.to(device)
 
-    history = {"train_loss": [], "val_loss": [], "val_metric": []}
+    history = {"train_loss": [], "train_metric": [], "val_loss": [], "val_metric": []}
     best_val_loss = float("inf")
     best_state = None
     epochs_without_improvement = 0
 
     for epoch in range(epochs):
         model.train()
-        running_loss, n_train_batches = 0.0, 0
+        running_loss, running_train_metric, n_train_batches = 0.0, 0.0, 0
         for features, target, weight in train_loader:
             features, target, weight = features.to(device), target.to(device), weight.to(device)
 
@@ -71,6 +74,7 @@ def train_loop(
             optimizer.step()
 
             running_loss += loss.item()
+            running_train_metric += metric_fn(pred.detach(), target, weight)
             n_train_batches += 1
 
         model.eval()
@@ -87,12 +91,15 @@ def train_loop(
                 n_val_batches += 1
 
         train_loss = running_loss / max(n_train_batches, 1)
+        train_metric = running_train_metric / max(n_train_batches, 1)
         val_loss = running_val_loss / max(n_val_batches, 1)
         val_metric = running_val_metric / max(n_val_batches, 1)
         history["train_loss"].append(train_loss)
+        history["train_metric"].append(train_metric)
         history["val_loss"].append(val_loss)
         history["val_metric"].append(val_metric)
-        print(f"Epoch {epoch + 1}/{epochs} — loss: {train_loss:.4f}, val_loss: {val_loss:.4f}, val_metric: {val_metric:.4f}")
+        print(f"Epoch {epoch + 1}/{epochs} — loss: {train_loss:.4f}, metric: {train_metric:.4f}, "
+              f"val_loss: {val_loss:.4f}, val_metric: {val_metric:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss

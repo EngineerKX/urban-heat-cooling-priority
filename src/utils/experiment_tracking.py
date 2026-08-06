@@ -70,18 +70,23 @@ def log_artifact_safe(local_path) -> None:
 
 
 def export_run_summary(run_name: str, experiment_name: str, params: dict, metrics_history: dict,
-                        tags: dict | None = None) -> dict:
+                        final_metrics: dict | None = None, tags: dict | None = None) -> dict:
     """Build the JSON-able summary a Colab notebook uploads to GCS after
     training, so the run survives the session ending. `metrics_history`
     values must be lists (one entry per epoch, e.g. `history["val_loss"]`
     from `src/utils/torch_train.py::train_loop`) so `import_remote_runs`
-    can replay the full curve rather than just the final number."""
+    can replay the full curve rather than just the final number.
+    `final_metrics` is for single-value summary metrics logged without a
+    step during the live session (e.g. `mlflow.log_metric("best_val_loss",
+    min(history["val_loss"]))`) -- kept separate from `metrics_history`
+    since they're not part of the per-epoch curve."""
     return {
         "run_name": run_name,
         "experiment_name": experiment_name,
         "tags": tags or {},
         "params": {k: str(v) for k, v in params.items()},
         "metrics_history": metrics_history,
+        "final_metrics": {k: float(v) for k, v in (final_metrics or {}).items()},
     }
 
 
@@ -106,6 +111,8 @@ def import_remote_runs(bucket: str, prefix: str = RUNS_GCS_PREFIX) -> list[str]:
             for metric_name, values in summary["metrics_history"].items():
                 for step, value in enumerate(values):
                     mlflow.log_metric(metric_name, value, step=step)
+            for metric_name, value in summary.get("final_metrics", {}).items():
+                mlflow.log_metric(metric_name, value)
         imported.add(blob.name)
         newly_imported.append(blob.name)
 

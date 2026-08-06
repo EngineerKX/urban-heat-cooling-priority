@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import geopandas as gpd
+import mlflow
 import numpy as np
 import pandas as pd
 
@@ -44,6 +45,7 @@ from src.heat_model.tabular import (
 )
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+from src.utils.experiment_tracking import HEAT_MODEL_EXPERIMENT_NAME, start_run
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 HOTSPOT_CLUSTERS_CSV_PATH = PROCESSED_DIR / "hotspot_clusters.csv"
@@ -89,6 +91,9 @@ def main():
     print(f"Full-table RMSE (in-sample + held-out mixed, informal): {full_rmse:.3f}°C "
           f"(see scripts/train_heat_model_xgboost.py's own run for the honest held-out test RMSE/R²)")
 
+    with start_run("diagnose_xgboost", experiment_name=HEAT_MODEL_EXPERIMENT_NAME, stage="diagnostic"):
+        mlflow.log_metric("full_table_rmse_informal", full_rmse)
+
     cnn_available = CNN_MODEL_SAVE_PATH.exists() and MIXER_JSON_PATH.exists() and LST_BICUBIC10_PATH.exists()
     print(f"\nCNN model available: {cnn_available}"
           + ("" if cnn_available else " — train it via notebooks/colab_training/train_heat_cnn.ipynb, then `python scripts/pull_models.py --model cnn`."))
@@ -109,6 +114,8 @@ def main():
         subzones_gdf_utm = subzones_gdf.to_crs(S2_UTM_CRS)
 
     examples = []
+    n_checked = 0
+    n_agreements = 0
     for subzone_id in DEMO_SUBZONES:
         row_df = df[df["subzone_id"] == subzone_id]
         if row_df.empty:
@@ -139,6 +146,8 @@ def main():
                 )
 
                 same_sign = np.sign(xgb_result["delta_lst"]) == np.sign(cnn_result["mean_delta_lst_in_edit_area"])
+                n_checked += 1
+                n_agreements += int(same_sign)
                 print(f"  CNN (centroid, r={DEMO_RADIUS_M:.0f}m): mean ΔLST in edit area = "
                       f"{cnn_result['mean_delta_lst_in_edit_area']:+.3f}°C "
                       f"({'✅ same direction as XGBoost' if same_sign else '⚠️  OPPOSITE direction from XGBoost'})")
@@ -154,6 +163,23 @@ def main():
                 print(f"  ⚠️  Centroid of {subzone_id} fell outside the CNN patch grid — skipping patch-level example.")
 
         examples.append(example)
+
+    if cnn_available and n_checked:
+        with start_run("diagnose_cnn_xgboost_crosscheck", experiment_name=HEAT_MODEL_EXPERIMENT_NAME, stage="diagnostic"):
+            mlflow.log_param("demo_subzones", ", ".join(DEMO_SUBZONES))
+            mlflow.log_param("delta_fraction_vegetation", DEMO_DELTA_VEGETATION)
+            mlflow.log_param("radius_m", DEMO_RADIUS_M)
+            mlflow.log_metric("n_subzones_checked", n_checked)
+            mlflow.log_metric("n_agreements", n_agreements)
+            mlflow.log_metric("agreement_rate", n_agreements / n_checked)
+            for example in examples:
+                if "cnn" not in example:
+                    continue
+                safe_name = example["subzone_id"].replace(" ", "_")
+                mlflow.log_metric(f"xgb_delta_lst_{safe_name}", example["xgboost"]["delta_lst"])
+                mlflow.log_metric(f"cnn_delta_lst_{safe_name}", example["cnn"]["mean_delta_lst_in_edit_area"])
+        print(f"\nCross-check agreement: {n_agreements}/{n_checked} subzones "
+              f"({n_agreements / n_checked * 100:.0f}%) — logged to MLflow.")
 
     CANNED_EXAMPLES_OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CANNED_EXAMPLES_OUT_PATH, "w") as f:
