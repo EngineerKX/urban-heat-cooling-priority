@@ -194,7 +194,7 @@ def informal_accuracy_check(classified_image, validation_df: pd.DataFrame, scale
         ee.Feature(ee.Geometry.Point([row.lon, row.lat]), {"point_id": row.point_id})
         for row in valid_rows.itertuples()
     ])
-    sampled = classified_image.sampleRegions(collection=val_fc, scale=scale, geometries=False, tileScale=4)
+    sampled = classified_image.sampleRegions(collection=val_fc, scale=scale, geometries=False, tileScale=8)
     sampled_records = sampled.getInfo()["features"]
     pred_by_id = {f["properties"]["point_id"]: f["properties"].get("rf_class") for f in sampled_records}
 

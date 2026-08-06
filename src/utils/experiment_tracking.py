@@ -30,6 +30,7 @@ from config.settings import REPO_ROOT
 
 EXPERIMENT_NAME = "landcover_classifiers"
 HEAT_MODEL_EXPERIMENT_NAME = "heat_model_s5"
+HOTSPOTS_EXPERIMENT_NAME = "hotspot_clusters_s4"
 RUNS_GCS_PREFIX = "training_runs"
 _IMPORTED_RUNS_MANIFEST = REPO_ROOT / "mlflow_imported_runs.txt"
 
