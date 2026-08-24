@@ -35,7 +35,7 @@ from src.landcover.unet_data import export_inference_patches
 from src.landcover.unet_infer import informal_accuracy_check, load_unet, run_inference_and_reconstruct
 from src.utils.seed import set_all_seeds
 
-VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"
+VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 
 
 def main(force_export: bool = False, with_probabilities: bool = False):

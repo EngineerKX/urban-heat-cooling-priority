@@ -49,7 +49,7 @@ from src.landcover.rf_baseline import (
 )
 from src.utils.experiment_tracking import log_artifact_safe, start_run
 
-VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"
+VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 
 
 def main(use_asset_cache: bool = True, with_probabilities: bool = False):

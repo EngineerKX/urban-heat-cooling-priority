@@ -19,12 +19,12 @@ from shapely.geometry import Point
 from config.settings import INTERIM_DIR, RANDOM_SEED, SG_CENTER
 
 SAMPLE_DIR = INTERIM_DIR / "validation_sample"
-SB1_OUTPUT_CSV = SAMPLE_DIR / "validation_sample_200.csv"
-WORK_CSV = SAMPLE_DIR / "validation_sample_200_labeling_progress.csv"
-FINAL_CSV = SAMPLE_DIR / "validation_sample_200_labeled.csv"
-FINAL_GEOJSON = SAMPLE_DIR / "validation_sample_200_labeled.geojson"
+SB1_OUTPUT_CSV = SAMPLE_DIR / "validation_sample_300.csv"
+WORK_CSV = SAMPLE_DIR / "validation_sample_300_labeling_progress.csv"
+FINAL_CSV = SAMPLE_DIR / "validation_sample_300_labeled.csv"
+FINAL_GEOJSON = SAMPLE_DIR / "validation_sample_300_labeled.geojson"
 
-TOTAL_POINTS = 200
+TOTAL_POINTS = 300
 
 CLASS_OPTIONS = [
     ("-- select a label --", ""),

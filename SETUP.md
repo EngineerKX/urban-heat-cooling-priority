@@ -202,7 +202,7 @@ server-side on Earth Engine in a couple of minutes.
 
 ### 8a. Prerequisite: a hand-labeled validation sample
 
-Both RF and U-Net need `data/interim/validation_sample/validation_sample_200_labeled.csv`
+Both RF and U-Net need `data/interim/validation_sample/validation_sample_300_labeled.csv`
 to exist before they'll train — it defines both the accuracy scoring
 ground truth *and* the spatial exclusion zone (so training never sees
 the points it'll later be scored against). If that file doesn't exist
@@ -221,7 +221,7 @@ yet on your machine:
    (vegetation / built_up / bare / water) for each.
 3. If you're joining a project where a teammate already has a labeled
    sample, it's simplest to just ask them for their
-   `validation_sample_200_labeled.csv` directly (it's gitignored, so it
+   `validation_sample_300_labeled.csv` directly (it's gitignored, so it
    never came across in the clone) rather than relabeling 200 points
    from scratch yourself.
 
@@ -294,7 +294,7 @@ you relabel/rebuild them) — Colab can't produce these on its own:
 
 ```
 # the hand-labeled validation sample (needed by train_unet.ipynb)
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, VALIDATION_SAMPLE_GCS_PREFIX; gcs.upload_file('data/interim/validation_sample/validation_sample_200_labeled.csv', GCS_MODEL_BUCKET, f'{VALIDATION_SAMPLE_GCS_PREFIX}.csv')"
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, VALIDATION_SAMPLE_GCS_PREFIX; gcs.upload_file('data/interim/validation_sample/validation_sample_300_labeled.csv', GCS_MODEL_BUCKET, f'{VALIDATION_SAMPLE_GCS_PREFIX}.csv')"
 
 # the land-cover ensemble raster (needed by train_heat_cnn.ipynb, after
 # you've trained U-Net and run scripts/build_landcover_ensemble.py locally)

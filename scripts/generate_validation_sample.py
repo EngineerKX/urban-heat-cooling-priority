@@ -36,12 +36,12 @@ from validation.input_validation.labeling_sample import (
 )
 
 OUT_DIR = INTERIM_DIR / "validation_sample"
-TOTAL_POINTS = 200
+TOTAL_POINTS = 300
 COVERAGE_THRESHOLD = 0.90
 
 
 def main(force: bool = False):
-    csv_path = OUT_DIR / "validation_sample_200.csv"
+    csv_path = OUT_DIR / "validation_sample_300.csv"
     if csv_path.exists() and not force:
         print(f"{csv_path} already exists — skipping recompute (pass --force to redraw the sample).")
         return csv_path
@@ -70,7 +70,7 @@ def main(force: bool = False):
         print(f"⚠️  Drew {len(sample_records)} points, expected {TOTAL_POINTS}.")
 
     labeling_df = build_labeling_table(sample_records)
-    export_labeling_table(labeling_df, OUT_DIR, prefix="validation_sample_200")
+    export_labeling_table(labeling_df, OUT_DIR, prefix="validation_sample_300")
     return csv_path
 
 

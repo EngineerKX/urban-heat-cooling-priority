@@ -143,7 +143,7 @@ def build_labeling_table(sample_records) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def export_labeling_table(labeling_df: pd.DataFrame, out_dir: Path, prefix: str = "validation_sample_200"):
+def export_labeling_table(labeling_df: pd.DataFrame, out_dir: Path, prefix: str = "validation_sample_300"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     geojson_path = out_dir / f"{prefix}.geojson"

@@ -27,7 +27,12 @@ earthengine-api==1.7.36
 google-cloud-storage==3.13.0
 google-auth
 python-dotenv==1.2.2
-rasterio==1.5.0
+# rasterio: NOT pinned to requirements.txt's 1.5.0 -- that release requires
+# Python >=3.12 and Colab's runtime is still on 3.11, so pip filters out every
+# 1.5.x wheel and fails with "No matching distribution found". 1.4.4 is the
+# newest release that builds for 3.11; the range keeps 1.5.x usable if/when
+# Colab's base image moves to 3.12+.
+rasterio>=1.4.4,<2
 geopandas==1.1.4
 pyproj==3.7.2
 shapely==2.1.2

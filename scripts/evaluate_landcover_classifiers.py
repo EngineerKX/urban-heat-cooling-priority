@@ -27,7 +27,7 @@ from validation.landcover_validation.classifier_evaluation import (
     save_evaluation_outputs,
 )
 
-VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"
+VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 
 RASTERS = {
     "rf": RF_RASTER_PATH,

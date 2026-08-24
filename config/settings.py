@@ -273,7 +273,7 @@ ENSEMBLE_RASTER_GCS_PREFIX = "training_inputs/ensemble_raster"
 # requires the Streamlit labeling app, a human, and the joint-labeling
 # process) — pushed manually after relabeling, pulled by train_unet.ipynb
 # to build the training region's exclusion zone.
-VALIDATION_SAMPLE_GCS_PREFIX = "training_inputs/validation_sample_200_labeled"
+VALIDATION_SAMPLE_GCS_PREFIX = "training_inputs/validation_sample_300_labeled"
 
 # ---------------------------------------------------------------------------
 # MODIS LST secondary cross-check (proposal's data plan table)
