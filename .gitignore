@@ -18,6 +18,7 @@ data/processed/**
 !data/interim/**/
 !data/processed/**/
 !**/.gitkeep
+!data/interim/validation_sample/**
 # data/labels/ is small (~300 pts) — stays tracked normally
 
 # --- Model weights: large binaries, use DVC/LFS/Release instead ---
