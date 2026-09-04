@@ -79,7 +79,8 @@ P0077,103.71580288665464,1.290768346725505,1,vegetation,10,tree_cover,built_up,1
 P0078,103.73633962680312,1.3750785835859156,1,vegetation,10,tree_cover,built_up,1-low,high 30 -40% green
 P0079,104.0229452049051,1.3955673226186849,1,vegetation,30,grassland,bare,2-medium,
 P0080,103.80716710663144,1.358833737640731,1,vegetation,10,tree_cover,vegetation,3-high,
-P0081,103.86544150099743,1.279171295677081,1,vegetation,10,tree_cover,uncertain_flag_for_review,1-low,Built-up. vegetation or bare?
+P0081,103.86544150099743,1.279171295677081,1,vegetation,10,tree_cover,vegetation,1-low,"Built-up. vegetation or bare?
+KX: Garden by the bay, put vegetation safer"
 P0082,103.80115055635684,1.3487904888353062,1,vegetation,10,tree_cover,vegetation,3-high,
 P0083,103.7346851363956,1.2703360610222183,1,vegetation,30,grassland,built_up,1-low,"Infrastructure, but next to water body"
 P0084,103.81987308084268,1.287200962442804,1,vegetation,10,tree_cover,built_up,3-high,
@@ -110,7 +111,7 @@ P0108,103.83013519217474,1.2497578791566362,1,vegetation,30,grassland,vegetation
 P0109,103.77012206705564,1.207579768038296,1,vegetation,10,tree_cover,uncertain_flag_for_review,1-low,"Bare, water, built-up?"
 P0110,103.8041738893944,1.4134657342361387,1,vegetation,10,tree_cover,vegetation,1-low,water edge?
 P0111,103.73661984340735,1.1684896340817217,1,vegetation,95,mangroves,vegetation,2-medium,
-P0112,103.86436624961053,1.2718439770481906,1,vegetation,30,grassland,uncertain_flag_for_review,1-low,"water, built-up, vegetation?"
+P0112,103.86436624961053,1.2718439770481906,1,vegetation,30,grassland,vegetation,1-low,"water, built-up, vegetation?"
 P0113,103.79576419355035,1.3365767191038618,1,vegetation,30,grassland,built_up,1-low,30% - 40% green
 P0114,103.64468408687496,1.3546773693513854,1,vegetation,10,tree_cover,vegetation,2-medium,
 P0115,103.87217985014456,1.283877948060867,1,vegetation,10,tree_cover,water,1-low,"50% water, 10% Built-up, 40% green"
@@ -268,7 +269,8 @@ P0266,103.99724715953587,1.3771028694769565,2,built_up,50,built_up,built_up,3-hi
 P0267,103.69031956118114,1.3868119690377316,2,built_up,50,built_up,built_up,1-low,bare and green? takes up like 40%
 P0268,103.72396647246708,1.3192642647413504,2,built_up,50,built_up,built_up,2-medium,
 P0269,104.022337945402,1.341472362821788,3,bare,60,bare_sparse_veg,bare,2-medium,
-P0270,103.91933377652296,1.3521930819714036,3,bare,60,bare_sparse_veg,uncertain_flag_for_review,1-low,"water, built-up, bare?"
+P0270,103.91933377652296,1.3521930819714036,3,bare,60,bare_sparse_veg,built_up,1-low,"water, built-up, bare?
+KX: should be built-up for hdb"
 P0271,103.61069611568692,1.2228782776674378,3,bare,60,bare_sparse_veg,vegetation,1-low,40% water
 P0272,104.01188197842188,1.4143781566355818,3,bare,60,bare_sparse_veg,built_up,2-medium,
 P0273,103.61984989508896,1.2463086266157166,3,bare,60,bare_sparse_veg,built_up,3-high,
