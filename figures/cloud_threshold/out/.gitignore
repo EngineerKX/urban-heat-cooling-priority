@@ -1,0 +1,3 @@
+# Generated figure PNGs -- regenerate with generate_cloud_threshold_figures.py
+*.png
+!.gitkeep
