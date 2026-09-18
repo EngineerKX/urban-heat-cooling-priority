@@ -76,7 +76,7 @@ def _style(feature):
     }
 
 
-m = folium.Map(location=SG_CENTER, zoom_start=11, tiles="cartodbpositron")
+m = folium.Map(location=SG_CENTER, zoom_start=11, tiles="OpenStreetMap")
 folium.GeoJson(
     plot_gdf.__geo_interface__, style_function=_style,
     tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_aliases),
