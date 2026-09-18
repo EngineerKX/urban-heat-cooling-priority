@@ -1,35 +1,25 @@
 """U-Net training — meant to run in Colab (GPU), called from
 `notebooks/colab_training/train_unet.ipynb`. Imports only `unet_model` +
-`unet_data` + `src.utils.torch_train`, deliberately not `unet_infer.py`
-(rasterio reconstruction never runs in Colab, see the migration plan).
+`unet_data`, deliberately not `unet_infer.py` (rasterio reconstruction
+never runs in Colab, see the migration plan).
 """
 
 from pathlib import Path
 
-import torch
-from torch import nn
+import tensorflow as tf
 
 from config import settings
 from config.settings import ALL_FEATURE_BANDS, UNET_MODEL_SAVE_PATH
 from src.landcover.unet_data import N_CLASSES
-from src.landcover.unet_model import UNet
-from src.utils.torch_train import default_device, train_loop
+from src.landcover.unet_model import build_unet
 
 
-def _weighted_accuracy(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> float:
-    """Matches Keras's `weighted_metrics=[CategoricalAccuracy()]` — mean
-    accuracy over valid (weight>0) pixels only."""
-    preds = pred.argmax(dim=1)
-    correct = (preds == target).float() * weight
-    return (correct.sum() / weight.sum().clamp(min=1e-8)).item()
-
-
-def train_unet(train_loader, val_loader, patch_size=settings.UNET_PATCH_SIZE,
+def train_unet(train_ds, val_ds, patch_size=settings.UNET_PATCH_SIZE,
                 n_feature_bands=len(ALL_FEATURE_BANDS), n_classes=N_CLASSES,
                 epochs=settings.UNET_EPOCHS, learning_rate=settings.UNET_LEARNING_RATE,
                 patience=settings.UNET_EARLY_STOP_PATIENCE, base_filters=settings.UNET_BASE_FILTERS,
                 model_save_path=UNET_MODEL_SAVE_PATH, data_fingerprint: str | None = None,
-                force_retrain: bool = False, device: torch.device | None = None):
+                force_retrain: bool = False):
     """Skip training entirely if a saved model already exists AND (when
     `data_fingerprint` is given) it was trained on the same data -- a
     fingerprint mismatch means the patches this model saw have since been
@@ -43,31 +33,36 @@ def train_unet(train_loader, val_loader, patch_size=settings.UNET_PATCH_SIZE,
     cached_fingerprint = fingerprint_path.read_text().strip() if fingerprint_path.exists() else None
     cache_valid = model_save_path.exists() and (data_fingerprint is None or cached_fingerprint == data_fingerprint)
 
-    model = UNet(in_channels=n_feature_bands, n_classes=n_classes, base_filters=base_filters)
-
     if cache_valid and not force_retrain:
         print(f"Loading cached model from {model_save_path} (pass force_retrain=True to retrain).")
-        model.load_state_dict(torch.load(model_save_path, map_location="cpu"))
-        return model, None
+        return tf.keras.models.load_model(model_save_path), None
     if model_save_path.exists() and not cache_valid:
         print(f"Cached model at {model_save_path} was trained on different data (fingerprint mismatch) — retraining.")
 
-    device = device or default_device()
-    print(model)
-    print(f"Training on device: {device}")
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    loss_fn = nn.CrossEntropyLoss(reduction="none")
-
-    history = train_loop(
-        model, train_loader, val_loader, loss_fn, _weighted_accuracy, optimizer,
-        epochs=epochs, patience=patience, device=device,
+    model = build_unet((patch_size, patch_size, n_feature_bands), n_classes=n_classes, base_filters=base_filters)
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+        loss=tf.keras.losses.CategoricalCrossentropy(),
+        weighted_metrics=[tf.keras.metrics.CategoricalAccuracy(name="accuracy")],
     )
+    model.summary()
+
+    early_stop = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=patience, restore_best_weights=True)
+    history = model.fit(train_ds, validation_data=val_ds, epochs=epochs, callbacks=[early_stop])
 
     model_save_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), model_save_path)
+    model.save(model_save_path)
     if data_fingerprint is not None:
         fingerprint_path.write_text(data_fingerprint)
     print(f"Model saved to {model_save_path}")
-    print(f"Best val_loss: {min(history['val_loss']):.4f}")
-    return model, history
+    print(f"Best val_loss: {min(history.history['val_loss']):.4f}")
+    # Normalize Keras's {"loss","accuracy","val_loss","val_accuracy"} history
+    # keys to the {"train_loss","train_metric","val_loss","val_metric"} shape
+    # the training notebooks' logging cell and export_run_summary expect.
+    normalized_history = {
+        "train_loss": history.history["loss"],
+        "train_metric": history.history["accuracy"],
+        "val_loss": history.history["val_loss"],
+        "val_metric": history.history["val_accuracy"],
+    }
+    return model, normalized_history

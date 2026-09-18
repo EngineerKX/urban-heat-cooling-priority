@@ -1,8 +1,8 @@
 """U-Net data I/O: building the GEE training-stack image, exporting/caching
-TFRecord patches, and parsing them into PyTorch DataLoaders. Split out of
-the old combined `unet.py` (see `snapshot/tensorflow`) so the Colab training
-notebooks can import just architecture+data+train, without pulling in
-`unet_infer.py`'s rasterio/reconstruction code they never run.
+TFRecord patches, and parsing them into Keras `tf.data.Dataset`s. Split out
+of the old combined `unet.py` (see `snapshot/tensorflow`) so the Colab
+training notebooks can import just architecture+data+train, without pulling
+in `unet_infer.py`'s rasterio/reconstruction code they never run.
 
 Two caching layers on the patch exports, stacked:
 1. Local disk (`_patches_already_downloaded` / fingerprint sidecar) — skip
@@ -23,8 +23,6 @@ import hashlib
 from pathlib import Path
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from config import settings
 from config.settings import (
@@ -172,46 +170,46 @@ def export_inference_patches(feature_image, boundary, patch_size=settings.UNET_P
 
 
 def read_raw_patches(patch_dir, bands, patch_size=settings.UNET_PATCH_SIZE) -> np.ndarray:
-    """Reads every `*.tfrecord.gz` shard in `patch_dir` via the pure-Python
-    `tfrecord` package (no tensorflow dependency — validated standalone
-    against these exact files before this module was written: patch counts,
-    shapes, dtypes, and band value ranges all matched what
-    `tf.io.parse_single_example` produced). Returns a
-    `(n_patches, len(bands), patch_size, patch_size)` float32 array,
-    channels in `bands` order and patches in on-disk shard/record order
+    """Reads every `*.tfrecord.gz` shard in `patch_dir` via native
+    `tf.data.TFRecordDataset` + `tf.io.parse_single_example` (no extra
+    dependency beyond `tensorflow` itself — GEE's patch export already
+    produces gzip-compressed TFRecord, TensorFlow's own format). Returns a
+    `(n_patches, patch_size, patch_size, len(bands))` float32 array,
+    channels-last in `bands` order and patches in on-disk shard/record order
     (row-major GEE patch-grid order — `unet_infer.py`'s tile reconstruction
     relies on this). Shared by `parse_training_patches` (below),
-    `unet_infer.py`, and `src/heat_model/cnn_data.py` — previously
-    duplicated 3x as near-identical `tf.io` blocks before this migration.
+    `unet_infer.py`, and `src/heat_model/cnn_data.py`.
     """
-    from tfrecord.torch.dataset import TFRecordDataset
+    import tensorflow as tf
 
     tfrecord_files = sorted(glob.glob(str(Path(patch_dir) / "*.tfrecord.gz")))
     if not tfrecord_files:
         raise FileNotFoundError(f"No TFRecord files found in {patch_dir} — check the export completed.")
 
-    description = {band: "float" for band in bands}
-    patches = []
-    for path in tfrecord_files:
-        dataset = TFRecordDataset(path, index_path=None, description=description, compression_type="gzip")
-        for record in dataset:
-            stacked = np.stack(
-                [np.asarray(record[band], dtype=np.float32).reshape(patch_size, patch_size) for band in bands],
-                axis=0,
-            )
-            patches.append(stacked)
-    return np.stack(patches, axis=0)
+    feature_description = {
+        band: tf.io.FixedLenFeature(shape=[patch_size, patch_size], dtype=tf.float32) for band in bands
+    }
+
+    def _parse(example_proto):
+        parsed = tf.io.parse_single_example(example_proto, feature_description)
+        return tf.stack([parsed[b] for b in bands], axis=-1)
+
+    raw_dataset = tf.data.TFRecordDataset(tfrecord_files, compression_type="GZIP")
+    parsed_dataset = raw_dataset.map(_parse, num_parallel_calls=tf.data.AUTOTUNE)
+    return np.stack(list(parsed_dataset.as_numpy_iterator()), axis=0)
 
 
 def parse_training_patches(patch_dir, patch_size=settings.UNET_PATCH_SIZE,
                             feature_bands=ALL_FEATURE_BANDS, n_classes=N_CLASSES,
                             train_val_split=settings.UNET_TRAIN_VAL_SPLIT, seed=42,
                             batch_size=settings.UNET_BATCH_SIZE):
-    all_bands = feature_bands + ["wc_class"]
-    raw = read_raw_patches(patch_dir, all_bands, patch_size)  # (n, len(all_bands), H, W)
+    import tensorflow as tf
 
-    features = raw[:, : len(feature_bands)]
-    label_raw = raw[:, len(feature_bands)]
+    all_bands = feature_bands + ["wc_class"]
+    raw = read_raw_patches(patch_dir, all_bands, patch_size)  # (n, H, W, len(all_bands))
+
+    features = raw[..., : len(feature_bands)]
+    label_raw = raw[..., len(feature_bands)]
     weight = (label_raw > 0).astype(np.float32)
 
     keep = weight.sum(axis=(1, 2)) > 0  # drop all-nodata patches
@@ -219,26 +217,25 @@ def parse_training_patches(patch_dir, patch_size=settings.UNET_PATCH_SIZE,
     n_patches = features.shape[0]
     print(f"Usable patches (after dropping all-nodata ones): {n_patches}")
 
-    # wc_class is 1..n_classes; CrossEntropyLoss wants 0-indexed class ids.
+    # wc_class is 1..n_classes; CategoricalCrossentropy wants one-hot labels.
     # Pixels with label_raw==0 (weight==0) get clamped to a valid-but-unused
-    # index — their loss contribution is zeroed by `weight` regardless.
-    label_idx = np.clip(label_raw - 1, 0, None).astype(np.int64)
+    # index before one-hot encoding — their loss contribution is zeroed by
+    # `weight` regardless.
+    label_idx = np.clip(label_raw - 1, 0, None).astype(np.int32)
+    label_onehot = tf.one_hot(label_idx, depth=n_classes).numpy()
 
     rng = np.random.default_rng(seed)
     indices = rng.permutation(n_patches)
     split_idx = int(n_patches * train_val_split)
     train_indices, val_indices = indices[:split_idx], indices[split_idx:]
 
-    def _make_loader(idx, shuffle):
-        ds = TensorDataset(
-            torch.from_numpy(features[idx]),
-            torch.from_numpy(label_idx[idx]),
-            torch.from_numpy(weight[idx]),
-        )
-        generator = torch.Generator().manual_seed(seed) if shuffle else None
-        return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, generator=generator)
+    def _make_dataset(idx, shuffle):
+        ds = tf.data.Dataset.from_tensor_slices((features[idx], label_onehot[idx], weight[idx]))
+        if shuffle:
+            ds = ds.shuffle(buffer_size=len(idx), seed=seed)
+        return ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
 
-    train_loader = _make_loader(train_indices, shuffle=True)
-    val_loader = _make_loader(val_indices, shuffle=False)
+    train_ds = _make_dataset(train_indices, shuffle=True)
+    val_ds = _make_dataset(val_indices, shuffle=False)
     print(f"Train patches: {len(train_indices)}, validation patches: {len(val_indices)}")
-    return train_loader, val_loader, n_patches
+    return train_ds, val_ds, n_patches

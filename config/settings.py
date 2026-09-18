@@ -237,7 +237,7 @@ UNET_TRAIN_VAL_SPLIT = 0.85
 # unet_train.py/unet_infer.py) during the TF->PyTorch migration, matching
 # this file's "only place constants live" convention — CNN_MODEL_SAVE_PATH
 # below already lived here, U-Net's didn't, which was the inconsistency.
-UNET_MODEL_SAVE_PATH = MODELS_DIR / "unet_landcover.pt"
+UNET_MODEL_SAVE_PATH = MODELS_DIR / "unet_landcover.keras"
 UNET_CLASSIFIED_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover.tif"
 UNET_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover_prob.tif"
 UNET_TRAIN_PATCH_DIR = INTERIM_DIR / "unet_patches" / "train"
@@ -261,7 +261,20 @@ XGB_MAX_DEPTH = 4
 XGB_LEARNING_RATE = 0.05
 XGB_SUBSAMPLE = 0.8
 
-CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.pt"
+# Same values as the UNET_* block above -- the CNN regressor reuses U-Net's
+# backbone (src/heat_model/cnn_model.py::build_cnn_regressor wraps
+# src/landcover/unet_model.py::build_unet_backbone), so both models are
+# trained with identical hyperparameters today. Literal duplicates, not a
+# shared UNET_* reference, so cnn_train.py and its notebook read
+# unambiguously as CNN settings and the two can be tuned independently.
+CNN_BATCH_SIZE = 8
+CNN_EPOCHS = 30
+CNN_LEARNING_RATE = 1e-3
+CNN_BASE_FILTERS = 32
+CNN_EARLY_STOP_PATIENCE = 5
+CNN_TRAIN_VAL_SPLIT = 0.85
+
+CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.keras"
 CNN_MODEL_GCS_PREFIX = "models/heat_cnn"
 
 # The one CNN training input Colab can't regenerate itself (needs local

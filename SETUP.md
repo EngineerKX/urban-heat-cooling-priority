@@ -330,8 +330,8 @@ for a real GEE export; everything after that is a fast download.
 **Gotcha: retraining in the same Colab session silently no-ops.** Both
 `train_unet()` and `train_cnn_regressor()` default to `force_retrain=False`
 — if a cached model already exists (matching training-data fingerprint)
-at `models/unet_landcover.pt` / `models/heat_cnn.pt` *on that Colab VM's
-own disk*, the training cell just reloads it instead of actually
+at `models/unet_landcover.keras` / `models/heat_cnn.keras` *on that Colab
+VM's own disk*, the training cell just reloads it instead of actually
 retraining. This is harmless on a genuinely fresh VM (nothing cached
 yet), but if you **reconnect to or stay on the same Colab session** you
 used for an earlier run and want to force a real new training pass
@@ -342,10 +342,10 @@ fingerprint), you must explicitly edit the training cell to pass
 will also silently no-op afterward (same weights → same hash → "already
 matches, skipping"), and you'll be looking at last run's numbers without
 realizing nothing new actually happened. Safest sign something's wrong:
-if GCS's `models/unet_landcover.pt` timestamp doesn't change after a
+if GCS's `models/unet_landcover.keras` timestamp doesn't change after a
 "finished" training run, this is almost certainly why — check with:
 ```
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET; c = gcs.get_client(); print([b.updated for b in c.list_blobs(GCS_MODEL_BUCKET, prefix='models/unet_landcover.pt')])"
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET; c = gcs.get_client(); print([b.updated for b in c.list_blobs(GCS_MODEL_BUCKET, prefix='models/unet_landcover.keras')])"
 ```
 
 **Browsing tracked training runs**: every `pull_models.py` call imports

@@ -50,7 +50,7 @@ def pull_model(name: str, force: bool = False) -> bool:
     remote_hash = gcs.download_text(GCS_MODEL_BUCKET, f"{gcs_prefix}.sha256")
 
     if remote_hash is None:
-        print(f"[{name}] No model found at gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.pt yet — train it in Colab first.")
+        print(f"[{name}] No model found at gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.keras yet — train it in Colab first.")
         return False
 
     sidecar_path = _sidecar_path(local_path)
@@ -60,8 +60,8 @@ def pull_model(name: str, force: bool = False) -> bool:
         print(f"[{name}] Already up to date ({local_path}) — skipping (pass --force to redo anyway).")
         return False
 
-    print(f"[{name}] Downloading gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.pt -> {local_path} ...")
-    gcs.download_blob(GCS_MODEL_BUCKET, f"{gcs_prefix}.pt", local_path)
+    print(f"[{name}] Downloading gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.keras -> {local_path} ...")
+    gcs.download_blob(GCS_MODEL_BUCKET, f"{gcs_prefix}.keras", local_path)
 
     downloaded_hash = _sha256_file(local_path)
     if downloaded_hash != remote_hash:

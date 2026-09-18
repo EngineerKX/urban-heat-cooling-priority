@@ -44,8 +44,8 @@ def build_local_feature_target_patches(
     patch_size=UNET_PATCH_SIZE, feature_bands=ALL_FEATURE_BANDS,
 ):
     """Returns (X, y, valid_mask):
-    X: (n_patches, len(feature_bands) + N_LANDCOVER_CLASSES, patch, patch) float32,
-       channels-first -- S2/index bands from the TFRecord patches + one-hot
+    X: (n_patches, patch, patch, len(feature_bands) + N_LANDCOVER_CLASSES) float32,
+       channels-last -- S2/index bands from the TFRecord patches + one-hot
        land-cover channels.
     y: (n_patches, patch, patch) float32 -- lst_bicubic10, 0.0 at invalid pixels.
     valid_mask: (n_patches, patch, patch) bool -- both land-cover AND LST valid.
@@ -58,12 +58,12 @@ def build_local_feature_target_patches(
     full_transform = Affine(*proj["affine"]["doubleMatrix"])
     crs = proj["crs"]
 
-    s2_patches = read_raw_patches(unet_inference_patch_dir, feature_bands, patch_size)  # (n, n_bands, H, W)
+    s2_patches = read_raw_patches(unet_inference_patch_dir, feature_bands, patch_size)  # (n, H, W, n_bands)
     n_patches = s2_patches.shape[0]
     print(f"Loaded {n_patches} S2/index feature patches (mixer total: {total_patches}).")
 
     n_bands = len(feature_bands)
-    X = np.zeros((n_patches, n_bands + N_LANDCOVER_CLASSES, patch_size, patch_size), dtype=np.float32)
+    X = np.zeros((n_patches, patch_size, patch_size, n_bands + N_LANDCOVER_CLASSES), dtype=np.float32)
     y = np.zeros((n_patches, patch_size, patch_size), dtype=np.float32)
     valid_mask = np.zeros((n_patches, patch_size, patch_size), dtype=bool)
 
@@ -76,9 +76,9 @@ def build_local_feature_target_patches(
             lc_window = _read_patch_window(lc_src, patch_transform, crs, patch_size, Resampling.nearest, nodata=0.0)
             lst_window = _read_patch_window(lst_src, patch_transform, crs, patch_size, Resampling.bilinear, nodata=np.nan)
 
-            X[idx, :n_bands] = s2_patches[idx]
+            X[idx, :, :, :n_bands] = s2_patches[idx]
             for class_id in range(1, N_LANDCOVER_CLASSES + 1):
-                X[idx, n_bands + class_id - 1] = (lc_window == class_id).astype(np.float32)
+                X[idx, :, :, n_bands + class_id - 1] = (lc_window == class_id).astype(np.float32)
 
             y[idx] = np.nan_to_num(lst_window, nan=0.0)
             valid_mask[idx] = (lc_window != 0) & ~np.isnan(lst_window)

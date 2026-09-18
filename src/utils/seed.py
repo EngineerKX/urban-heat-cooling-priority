@@ -13,9 +13,7 @@ def set_all_seeds(seed: int = RANDOM_SEED) -> None:
     random.seed(seed)
     np.random.seed(seed)
     try:
-        import torch
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
+        import tensorflow as tf
+        tf.random.set_seed(seed)
     except ImportError:
         pass

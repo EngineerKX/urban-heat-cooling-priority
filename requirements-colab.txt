@@ -4,12 +4,10 @@
 # `pip install` -- not a copy of requirements.txt.
 #
 # Deliberately EXCLUDES:
-#   - torch: Colab ships a pre-installed, CUDA-matched torch build already.
+#   - tensorflow: Colab ships a pre-installed, GPU-matched TF build already.
 #     Installing the local CPU-only pin from requirements.txt here risks
 #     silently replacing it with a mismatched wheel and losing GPU accel --
 #     the one thing training in Colab is for.
-#   - tensorflow: this project no longer uses it at all (see the
-#     TensorFlow->PyTorch migration) -- never needed here either.
 #   - app-only packages (streamlit, streamlit-folium, folium, plotly,
 #     altair, pydeck, watchdog, GitPython, gitdb) and non-DL packages
 #     (xgboost, scikit-learn) that the Streamlit app / RF+XGBoost need but
@@ -39,6 +37,5 @@ shapely==2.1.2
 affine==2.4.0
 numpy
 mlflow
-tfrecord==1.14.6
 crc32c==2.8
 requests

@@ -16,33 +16,22 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
+import tensorflow as tf
 
 from config import settings
-from config.settings import (
-    ALL_FEATURE_BANDS,
-    UNET_BASE_FILTERS,
-    UNET_CLASSIFIED_RASTER_PATH,
-    UNET_MODEL_SAVE_PATH,
-    UNET_PROB_RASTER_PATH,
-)
+from config.settings import ALL_FEATURE_BANDS, UNET_CLASSIFIED_RASTER_PATH, UNET_MODEL_SAVE_PATH, UNET_PROB_RASTER_PATH
 from src.ingest.worldcover import BUCKET_NAMES
 from src.landcover.unet_data import N_CLASSES, read_raw_patches
-from src.landcover.unet_model import UNet
 
 
-def load_unet(path=UNET_MODEL_SAVE_PATH, in_channels=len(ALL_FEATURE_BANDS), n_classes=N_CLASSES,
-              base_filters=UNET_BASE_FILTERS) -> UNet:
-    """`map_location="cpu"` is mandatory here — weights are always saved
-    from a Colab CUDA session, and loading without it raises on any
-    machine (yours, your partner's) that has no GPU."""
-    model = UNet(in_channels=in_channels, n_classes=n_classes, base_filters=base_filters)
-    model.load_state_dict(torch.load(path, map_location="cpu"))
-    model.eval()
-    return model
+def load_unet(path=UNET_MODEL_SAVE_PATH):
+    """A `.keras` file embeds the full architecture alongside the weights,
+    so no `in_channels`/`n_classes`/`base_filters` reconstruction is needed
+    here (unlike the old PyTorch `state_dict`-based load)."""
+    return tf.keras.models.load_model(path)
 
 
-def run_inference_and_reconstruct(model: UNet, inference_patch_dir, boundary, patch_size=settings.UNET_PATCH_SIZE,
+def run_inference_and_reconstruct(model, inference_patch_dir, boundary, patch_size=settings.UNET_PATCH_SIZE,
                                    feature_bands=ALL_FEATURE_BANDS, out_path=UNET_CLASSIFIED_RASTER_PATH,
                                    also_write_probabilities: bool = False, prob_out_path=UNET_PROB_RASTER_PATH,
                                    batch_size: int = 16):
@@ -73,23 +62,11 @@ def run_inference_and_reconstruct(model: UNet, inference_patch_dir, boundary, pa
     patches_per_col = mixer["totalPatches"] // patches_per_row
     proj = mixer["projection"]
 
-    patches = read_raw_patches(inference_dir, feature_bands, patch_size)  # (n, C, H, W)
+    patches = read_raw_patches(inference_dir, feature_bands, patch_size)  # (n, H, W, C)
     print(f"Loaded {len(patches)} inference patches for prediction.")
 
-    all_pred_class = np.zeros(len(patches), dtype=object)
-    all_pred_prob = np.zeros(len(patches), dtype=object)
-    model.eval()
-    with torch.no_grad():
-        for start in range(0, len(patches), batch_size):
-            batch = torch.from_numpy(patches[start:start + batch_size])
-            logits = model(batch)
-            probs = torch.softmax(logits, dim=1).numpy()  # (b, n_classes, H, W)
-            pred_class = probs.argmax(axis=1).astype(np.uint8) + 1  # (b, H, W)
-            for i in range(pred_class.shape[0]):
-                all_pred_class[start + i] = pred_class[i]
-                all_pred_prob[start + i] = np.transpose(probs[i], (1, 2, 0))  # (H, W, n_classes)
-            if (start + batch_size) % 160 < batch_size:
-                print(f"  ...predicted {min(start + batch_size, len(patches))}/{len(patches)} patches")
+    probs = model.predict(patches, batch_size=batch_size, verbose=0)  # (n, H, W, n_classes), softmax baked in
+    pred_class = probs.argmax(axis=-1).astype(np.uint8) + 1  # (n, H, W)
 
     full_raster = np.zeros((patches_per_col * patch_size, patches_per_row * patch_size), dtype=np.uint8)
     full_prob = (
@@ -100,9 +77,9 @@ def run_inference_and_reconstruct(model: UNet, inference_patch_dir, boundary, pa
         row, col = idx // patches_per_row, idx % patches_per_row
         row_slice = slice(row * patch_size, (row + 1) * patch_size)
         col_slice = slice(col * patch_size, (col + 1) * patch_size)
-        full_raster[row_slice, col_slice] = all_pred_class[idx]
+        full_raster[row_slice, col_slice] = pred_class[idx]
         if full_prob is not None:
-            full_prob[row_slice, col_slice, :] = all_pred_prob[idx]
+            full_prob[row_slice, col_slice, :] = probs[idx]
 
     crs_str = proj["crs"]
     affine_params = proj.get("affine", {}).get("doubleMatrix")

@@ -51,8 +51,8 @@ def push_model(name: str, force: bool = False) -> bool:
         print(f"[{name}] Remote copy already matches this hash — skipping push (pass --force to redo anyway).")
         return False
 
-    print(f"[{name}] Uploading {local_path} -> gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.pt ...")
-    gcs.upload_file(local_path, GCS_MODEL_BUCKET, f"{gcs_prefix}.pt")
+    print(f"[{name}] Uploading {local_path} -> gs://{GCS_MODEL_BUCKET}/{gcs_prefix}.keras ...")
+    gcs.upload_file(local_path, GCS_MODEL_BUCKET, f"{gcs_prefix}.keras")
     gcs.upload_text(local_hash, GCS_MODEL_BUCKET, f"{gcs_prefix}.sha256")
     print(f"[{name}] Pushed OK.")
     return True

@@ -1,26 +1,21 @@
-"""S5 (C2) CNN heat-model architecture only — pure `torch.nn.Module`.
-Reuses `src.landcover.unet_model.UNetBackbone` (same encoder-decoder as the
-land-cover U-Net) with a linear regression head instead of a softmax
-classification head, so the two models stay identical apart from what they
-predict.
+"""S5 (C2) CNN heat-model architecture only — pure Keras functional-API
+builder. Reuses `src.landcover.unet_model.build_unet_backbone` (same
+encoder-decoder as the land-cover U-Net) with a linear regression head
+instead of a softmax classification head, so the two models stay identical
+apart from what they predict.
 """
 
-from torch import nn
+from tensorflow.keras import layers, models
 
 from src.ingest.worldcover import BUCKET_NAMES
-from src.landcover.unet_model import UNetBackbone
+from src.landcover.unet_model import build_unet_backbone
 
 N_LANDCOVER_CLASSES = len(BUCKET_NAMES)
 
 
-class CNNRegressor(nn.Module):
-    """`forward()` returns raw linear output of shape `(N, 1, H, W)` —
-    predicted `lst_bicubic10`."""
-
-    def __init__(self, in_channels: int, base_filters: int = 32):
-        super().__init__()
-        self.backbone = UNetBackbone(in_channels, base_filters)
-        self.head = nn.Conv2d(self.backbone.out_channels, 1, kernel_size=1)
-
-    def forward(self, x):
-        return self.head(self.backbone(x))
+def build_cnn_regressor(input_shape, base_filters: int = 32):
+    """`build_unet_backbone` + a 1x1-conv linear regression head. Output
+    shape `(N, H, W, 1)` — predicted `lst_bicubic10`."""
+    inputs, d1 = build_unet_backbone(input_shape, base_filters)
+    outputs = layers.Conv2D(1, 1, activation="linear")(d1)
+    return models.Model(inputs, outputs, name="heat_cnn_regressor")

@@ -5,47 +5,30 @@ handful of patches at a time is cheap, was never the GPU bottleneck).
 import json
 
 import numpy as np
-import torch
+import tensorflow as tf
 
-from config.settings import ALL_FEATURE_BANDS, CNN_MODEL_SAVE_PATH, UNET_BASE_FILTERS, UNET_PATCH_SIZE
-from src.heat_model.cnn_model import N_LANDCOVER_CLASSES, CNNRegressor
-
-
-def load_cnn_regressor(path=CNN_MODEL_SAVE_PATH, in_channels=len(ALL_FEATURE_BANDS) + N_LANDCOVER_CLASSES,
-                        base_filters=UNET_BASE_FILTERS) -> CNNRegressor:
-    """`map_location="cpu"` is mandatory here — weights are always saved
-    from a Colab CUDA session, and loading without it raises on any
-    machine (yours, your partner's) that has no GPU."""
-    model = CNNRegressor(in_channels=in_channels, base_filters=base_filters)
-    model.load_state_dict(torch.load(path, map_location="cpu"))
-    model.eval()
-    return model
+from config.settings import CNN_MODEL_SAVE_PATH, UNET_PATCH_SIZE
 
 
-def run_cnn_inference(model: CNNRegressor, X: np.ndarray, batch_size: int = 16) -> np.ndarray:
-    """X: (n_patches, C, H, W). Returns (n_patches, H, W) predicted LST,
-    batched to avoid holding every patch through the model at once."""
-    model.eval()
-    preds = []
-    with torch.no_grad():
-        for start in range(0, X.shape[0], batch_size):
-            batch = torch.from_numpy(X[start:start + batch_size])
-            pred = model(batch)  # (b, 1, H, W)
-            preds.append(pred[:, 0].numpy())
-    return np.concatenate(preds, axis=0)
+def load_cnn_regressor(path=CNN_MODEL_SAVE_PATH):
+    """A `.keras` file embeds the full architecture alongside the weights,
+    so no `in_channels`/`base_filters` reconstruction is needed here (unlike
+    the old PyTorch `state_dict`-based load)."""
+    return tf.keras.models.load_model(path)
 
 
-def predict_patch(model: CNNRegressor, patch_X: np.ndarray) -> np.ndarray:
-    """`patch_X`: (C, H, W) float32, channels-first (matches
+def run_cnn_inference(model, X: np.ndarray, batch_size: int = 16) -> np.ndarray:
+    """X: (n_patches, H, W, C). Returns (n_patches, H, W) predicted LST."""
+    return model.predict(X, batch_size=batch_size, verbose=0)[..., 0]
+
+
+def predict_patch(model, patch_X: np.ndarray) -> np.ndarray:
+    """`patch_X`: (H, W, C) float32, channels-last (matches
     `cnn_data.build_local_feature_target_patches`'s per-patch layout — the
     single-patch counterpart of `run_cnn_inference`, used by
     `src/heat_model/counterfactual.py` for the original-vs-edited patch
     pair). Returns (H, W) predicted LST."""
-    model.eval()
-    with torch.no_grad():
-        tensor = torch.from_numpy(patch_X).unsqueeze(0)  # (1, C, H, W)
-        pred = model(tensor)  # (1, 1, H, W)
-    return pred[0, 0].numpy()
+    return model.predict(patch_X[np.newaxis, ...], verbose=0)[0, ..., 0]
 
 
 def locate_patch_and_pixel(lon: float, lat: float, mixer_json_path, patch_size=UNET_PATCH_SIZE):
