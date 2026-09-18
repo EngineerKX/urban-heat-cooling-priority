@@ -40,16 +40,16 @@ with st.expander("Week-1 gates (G1–G5)", expanded=True):
         st.caption(f"`{gates_path}` not found — run `python scripts/run_week1_gates.py` first.")
 
 # --- Land-cover classifiers ---------------------------------------------------
-with st.expander("Land-cover classifiers: RF vs. U-Net vs. ensemble", expanded=True):
+with st.expander("Land-cover classifiers: RF vs. U-Net vs. hybrid", expanded=True):
     eval_dir = PROCESSED_DIR / "landcover" / "evaluation"
     comparison_path = eval_dir / "comparison_table.csv"
     if comparison_path.exists():
         comparison_df = pd.read_csv(comparison_path)
         st.dataframe(comparison_df, use_container_width=True, hide_index=True)
 
-        confusion_path = eval_dir / "confusion_matrix_ensemble.csv"
+        confusion_path = eval_dir / "confusion_matrix_hybrid.csv"
         if confusion_path.exists():
-            st.markdown("**Ensemble confusion matrix**")
+            st.markdown("**Hybrid confusion matrix**")
             confusion_df = pd.read_csv(confusion_path).rename(columns={"Unnamed: 0": "actual \\ predicted"})
             st.dataframe(confusion_df, use_container_width=True, hide_index=True)
     else:
@@ -163,7 +163,7 @@ with st.expander("S6 — calibrated confidence bands", expanded=False):
         st.metric("Overlapping adjacent pairs in top 20", f"{overlaps} / {len(top20) - 1}")
         st.dataframe(top20, use_container_width=True, hide_index=True)
         st.caption(
-            "Bootstrapped from NEA-heldout RMSE (exposure) + land-cover ensemble recall SE (adaptive capacity) "
+            "Bootstrapped from NEA-heldout RMSE (exposure) + land-cover hybrid recall SE (adaptive capacity) "
             "— NOT the sensitivity pillar (no validation-error estimate exists for it). The exposure RMSE also "
             "mixes real noise with the systematic LST-vs-air-temperature offset, so read these as a pessimistic "
             "upper bound on rank uncertainty. See validation/score_validation/confidence_bands.py's docstring."

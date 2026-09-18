@@ -2,7 +2,7 @@
 """Train the Random Forest land-cover baseline and classify all of
 Singapore. Replaces train_rf_baseline.ipynb (Track B / RF1).
 
-NOT included here: the formal RF-vs-U-Net-vs-ensemble evaluation (confusion
+NOT included here: the formal RF-vs-U-Net-vs-hybrid evaluation (confusion
 matrix, per-class F1) — that runs once all three exist, scored identically.
 
 Usage: python scripts/train_landcover_rf.py [--force-retrain]
@@ -121,6 +121,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-asset-cache", action="store_true", help="Always retrain instead of reusing a cached GEE asset classifier.")
     parser.add_argument("--with-probabilities", action="store_true",
-                         help="Also export a per-class probability raster (needed for the soft-voting ensemble).")
+                         help="Also export a per-class probability raster (needed for the soft-voting hybrid).")
     args = parser.parse_args()
     main(use_asset_cache=not args.no_asset_cache, with_probabilities=args.with_probabilities)

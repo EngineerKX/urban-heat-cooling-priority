@@ -73,6 +73,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--force-export", action="store_true", help="Re-export inference patches even if cached locally/in GCS.")
     parser.add_argument("--with-probabilities", action="store_true",
-                         help="Also write a per-class probability raster (needed for the soft-voting ensemble).")
+                         help="Also write a per-class probability raster (needed for the soft-voting hybrid).")
     args = parser.parse_args()
     main(force_export=args.force_export, with_probabilities=args.with_probabilities)

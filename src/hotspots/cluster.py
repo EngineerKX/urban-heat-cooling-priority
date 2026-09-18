@@ -3,7 +3,7 @@ table. Builds BOTH algorithms (the project spec says "K-means/GMM"),
 compares them via unsupervised-clustering quality metrics, and keeps
 whichever wins as `primary_cluster` while leaving the other visible as an
 ablation column -- the same "visible ablation" habit as PCA-vs-equal-weight
-scoring and the RF/U-Net/ensemble land-cover comparison.
+scoring and the RF/U-Net/hybrid land-cover comparison.
 """
 
 import pandas as pd

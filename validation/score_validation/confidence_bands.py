@@ -6,7 +6,7 @@ approach was rejected). Two noise sources:
 
 - Exposure: rmse_vs_heldout's already-computed NEA-heldout RMSE for the
   chosen LST variant (this module's own function below just calls it).
-- Adaptive capacity: the land-cover ensemble's own vegetation-class recall
+- Adaptive capacity: the land-cover hybrid's own vegetation-class recall
   binomial standard error, from its confusion matrix (already produced by
   scripts/evaluate_landcover_classifiers.py).
 

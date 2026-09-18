@@ -168,7 +168,7 @@ def classify_probability(feature_image, classifier, boundary, valid_mask, class_
     if this function or GEE's classifier behavior ever changes.
 
     Adds an explicit `valid_mask` band from build_feature_image's own mask
-    (not inferred later from nodata) so downstream ensemble alignment never
+    (not inferred later from nodata) so downstream hybrid alignment never
     has to guess which pixels are real — a probability of exactly 0.0 for a
     class at a genuinely valid pixel is legitimate and must not be confused
     with "outside the mask".
@@ -182,7 +182,7 @@ def classify_probability(feature_image, classifier, boundary, valid_mask, class_
 
 
 def informal_accuracy_check(classified_image, validation_df: pd.DataFrame, scale=TARGET_SCALE_M):
-    """Sanity check only — NOT the formal RF-vs-U-Net-vs-ensemble evaluation."""
+    """Sanity check only — NOT the formal RF-vs-U-Net-vs-hybrid evaluation."""
     validation_df = validation_df.copy()
     validation_df["agreed_label"] = validation_df["agreed_label"].fillna("").astype(str)
     valid_rows = validation_df[validation_df["agreed_label"].isin(BUCKET_NAMES.values())].copy()
@@ -207,7 +207,7 @@ def informal_accuracy_check(classified_image, validation_df: pd.DataFrame, scale
     accuracy = (scored["rf_pred_bucket"] == scored["true_bucket"]).mean()
     crosstab = pd.crosstab(scored["agreed_label"], scored["rf_pred_name"])
     print(f"Informal RF accuracy on {len(scored)} validation points: {accuracy * 100:.1f}%")
-    print("(Sanity check only — run the formal evaluation once U-Net + ensemble also exist.)")
+    print("(Sanity check only — run the formal evaluation once U-Net + hybrid also exist.)")
     return accuracy, crosstab
 
 

@@ -23,7 +23,7 @@ from config.settings import (
 )
 from src.ingest.gee import add_spectral_indices, fetch_sentinel2_collection
 from src.ingest.singstat import fetch_population_by_subzone
-from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.landcover.zonal import zonal_class_fractions
 from src.utils.geo import normalize, zonal_mean
 
@@ -100,7 +100,7 @@ def build_adaptive_capacity_pillar(
 ) -> pd.DataFrame:
     """Returns [subzone_id, greenery_fraction] — an INTERIM NDVI-threshold
     proxy for vegetation fraction, standing in until the real S3 land-cover
-    output (RF/U-Net ensemble) is validated and ready to use instead.
+    output (RF/U-Net hybrid) is validated and ready to use instead.
     """
     s2_masked = fetch_sentinel2_collection(sg_bbox, years, months, cloud_prob_max)
     s2_indexed = s2_masked.map(add_spectral_indices)
@@ -118,16 +118,16 @@ def build_adaptive_capacity_pillar(
     return ac_df[ac_df["subzone_id"].astype(str).isin(heat_ids)].copy()
 
 
-# --- Adaptive-capacity pillar (real S3 land-cover ensemble) -----------------
+# --- Adaptive-capacity pillar (real S3 land-cover hybrid) -----------------
 
 def build_adaptive_capacity_pillar_landcover(
     subzones_gdf: gpd.GeoDataFrame,
     id_property: str,
     heat_subzone_ids: pd.Series,
-    raster_path=ENSEMBLE_RASTER_PATH,
+    raster_path=HYBRID_RASTER_PATH,
 ) -> pd.DataFrame:
     """Returns [subzone_id, greenery_fraction] using the validated RF/U-Net
-    ensemble's vegetation fraction per subzone -- the real S3 output that
+    hybrid's vegetation fraction per subzone -- the real S3 output that
     build_adaptive_capacity_pillar's NDVI threshold was always described as
     "standing in" for. That NDVI-based function is left untouched so both
     remain callable for comparison (see ADAPTIVE_CAPACITY_SOURCE and

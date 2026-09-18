@@ -10,7 +10,7 @@ re-run inference on the original vs. edited patch.
 
 XGBoost (src/heat_model/tabular.py) and this CNN answer at different
 granularities (subzone-level tabular vs. 10m patch-level) and are
-deliberately NOT soft-voted like the RF+U-Net land-cover ensemble --
+deliberately NOT soft-voted like the RF+U-Net land-cover hybrid --
 rescale_subzone_delta lets their counterfactual deltas be compared
 side-by-side as a cross-model sanity check instead.
 """

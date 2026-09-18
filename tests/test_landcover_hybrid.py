@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-"""Standalone verification for src/landcover/ensemble.py against small
+"""Standalone verification for src/landcover/hybrid.py against small
 synthetic in-memory GeoTIFFs -- no GEE/GPU required. The repo has no test
 framework (no pytest, no tests/ convention yet), so this follows the
 existing codebase style of a runnable script with printed pass/fail checks
 (see e.g. build_training_region's excluded-area sanity check) rather than
 introducing a new dependency.
 
-Usage: python tests/test_landcover_ensemble.py
+Usage: python tests/test_landcover_hybrid.py
 """
 
 import sys
@@ -19,9 +19,9 @@ import numpy as np
 import rasterio
 from affine import Affine
 
-from src.landcover.ensemble import (
+from src.landcover.hybrid import (
     average_probabilities,
-    build_ensemble,
+    build_hybrid,
     load_prob_raster,
     probabilities_to_hard_labels,
 )
@@ -140,7 +140,7 @@ def test_average_and_argmax():
     print("PASS: average_probabilities + probabilities_to_hard_labels")
 
 
-def test_build_ensemble_end_to_end(tmp_dir):
+def test_build_hybrid_end_to_end(tmp_dir):
     ref_transform = Affine(10.0, 0.0, 100000.0, 0.0, -10.0, 200000.0)
     shape = (3, 3)
 
@@ -157,19 +157,19 @@ def test_build_ensemble_end_to_end(tmp_dir):
     _write_prob_raster(rf_path, rf_prob, rf_valid, ref_transform)
     _write_prob_raster(unet_path, unet_prob, unet_valid, ref_transform)
 
-    label_path, prob_path = build_ensemble(
+    label_path, prob_path = build_hybrid(
         rf_path, unet_path,
-        label_out_path=tmp_dir / "ensemble.tif", prob_out_path=tmp_dir / "ensemble_prob.tif",
+        label_out_path=tmp_dir / "hybrid.tif", prob_out_path=tmp_dir / "hybrid_prob.tif",
     )
 
     with rasterio.open(label_path) as src:
         label_data = src.read(1)
-    assert (label_data == 1).all(), "both models agree on vegetation -> ensemble should be all bucket 1"
+    assert (label_data == 1).all(), "both models agree on vegetation -> hybrid should be all bucket 1"
 
     with rasterio.open(prob_path) as src:
         veg_band = src.read(1)
     assert np.allclose(veg_band, 0.8, atol=1e-4), f"expected avg(0.9, 0.7)=0.8, got {veg_band.mean()}"
-    print("PASS: build_ensemble end-to-end")
+    print("PASS: build_hybrid end-to-end")
 
 
 def main():
@@ -179,8 +179,8 @@ def main():
         test_load_prob_raster_same_grid(tmp_dir)
         test_load_prob_raster_reproject(tmp_dir)
         test_average_and_argmax()
-        test_build_ensemble_end_to_end(tmp_dir)
-    print("\nAll ensemble.py checks passed.")
+        test_build_hybrid_end_to_end(tmp_dir)
+    print("\nAll hybrid.py checks passed.")
 
 
 if __name__ == "__main__":

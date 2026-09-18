@@ -185,7 +185,7 @@ SENSITIVITY_ELDERLY_WEIGHT = 0.5
 
 # Which greenery-fraction source feeds the adaptive-capacity pillar's
 # canonical `greenery_fraction` column: "landcover" (the validated RF/U-Net
-# ensemble, see src/landcover/zonal.py) or "ndvi" (the older NDVI-threshold
+# hybrid, see src/landcover/zonal.py) or "ndvi" (the older NDVI-threshold
 # proxy above). Both get computed and compared (Spearman correlation
 # printed by scripts/build_adaptive_capacity_pillar.py) regardless of this
 # setting -- it only decides which one becomes `greenery_fraction`.
@@ -278,9 +278,9 @@ CNN_MODEL_SAVE_PATH = MODELS_DIR / "heat_cnn.keras"
 CNN_MODEL_GCS_PREFIX = "models/heat_cnn"
 
 # The one CNN training input Colab can't regenerate itself (needs local
-# U-Net inference + RF combined via build_landcover_ensemble.py) — pushed
-# manually after a local ensemble build, pulled by the CNN Colab notebook.
-ENSEMBLE_RASTER_GCS_PREFIX = "training_inputs/ensemble_raster"
+# U-Net inference + RF combined via build_landcover_hybrid.py) — pushed
+# manually after a local hybrid build, pulled by the CNN Colab notebook.
+HYBRID_RASTER_GCS_PREFIX = "training_inputs/hybrid_raster"
 
 # The hand-labeled validation sample also can't be regenerated in Colab (it
 # requires the Streamlit labeling app, a human, and the joint-labeling

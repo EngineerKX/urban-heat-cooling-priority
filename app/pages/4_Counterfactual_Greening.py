@@ -47,7 +47,7 @@ XGB_MODEL_PATH = PROCESSED_DIR / "heat_model" / "xgb_model.pkl"
 
 CNN_INFERENCE_PATCH_DIR = INTERIM_DIR / "unet_patches" / "inference"
 CNN_MIXER_JSON_PATH = CNN_INFERENCE_PATCH_DIR / "unet_inference.json"
-ENSEMBLE_RASTER_PATH = PROCESSED_DIR / "landcover" / "ensemble_landcover.tif"
+HYBRID_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"
 LST_BICUBIC10_PATH = INTERIM_DIR / "lst_bicubic10_full.tif"
 
 st.subheader("Subzone-level (XGBoost) — live")
@@ -102,7 +102,7 @@ st.subheader("Patch-level (CNN) — live")
 
 cnn_available = (
     CNN_MODEL_SAVE_PATH.exists() and CNN_MIXER_JSON_PATH.exists()
-    and ENSEMBLE_RASTER_PATH.exists() and LST_BICUBIC10_PATH.exists()
+    and HYBRID_RASTER_PATH.exists() and LST_BICUBIC10_PATH.exists()
 )
 
 if not cnn_available:
@@ -120,11 +120,11 @@ else:
 
     @st.cache_resource
     def load_cnn_assets():
-        """Reads all ~1000 patches + reprojects the ensemble/LST rasters onto
+        """Reads all ~1000 patches + reprojects the hybrid/LST rasters onto
         each -- a real one-time cost (tens of seconds), so cached per session
         rather than re-run on every slider move."""
         X, _y, valid_mask = build_local_feature_target_patches(
-            CNN_INFERENCE_PATCH_DIR, CNN_MIXER_JSON_PATH, ENSEMBLE_RASTER_PATH, LST_BICUBIC10_PATH,
+            CNN_INFERENCE_PATCH_DIR, CNN_MIXER_JSON_PATH, HYBRID_RASTER_PATH, LST_BICUBIC10_PATH,
         )
         class_means = class_mean_feature_vectors(X, valid_mask=valid_mask)
         model = load_cnn_regressor(CNN_MODEL_SAVE_PATH)

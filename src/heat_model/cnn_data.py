@@ -6,10 +6,10 @@ Reuses U-Net's ALREADY-DOWNLOADED inference patches
 (data/interim/unet_patches/inference/) as the spatial feature source -- the
 only new GEE work this needs is a single full-Singapore lst_bicubic10
 GeoTIFF export (variant_bicubic10, unmodified, via the existing
-export_geotiff_to_gcs). The ensemble land-cover raster and that LST raster
+export_geotiff_to_gcs). The hybrid land-cover raster and that LST raster
 are each on their own grid, so per-patch windows are read via
 rasterio.warp.reproject onto the patch's own transform (same technique
-src/landcover/ensemble.py::load_prob_raster uses to reconcile RF's vs.
+src/landcover/hybrid.py::load_prob_raster uses to reconcile RF's vs.
 U-Net's differing grids) rather than assumed to already align pixel-for-
 pixel with the U-Net TFRecord patch grid.
 """
@@ -40,7 +40,7 @@ def _read_patch_window(src, dst_transform, dst_crs, patch_size, resampling, noda
 
 
 def build_local_feature_target_patches(
-    unet_inference_patch_dir, mixer_json_path, ensemble_raster_path, lst_bicubic10_raster_path,
+    unet_inference_patch_dir, mixer_json_path, hybrid_raster_path, lst_bicubic10_raster_path,
     patch_size=UNET_PATCH_SIZE, feature_bands=ALL_FEATURE_BANDS,
 ):
     """Returns (X, y, valid_mask):
@@ -67,7 +67,7 @@ def build_local_feature_target_patches(
     y = np.zeros((n_patches, patch_size, patch_size), dtype=np.float32)
     valid_mask = np.zeros((n_patches, patch_size, patch_size), dtype=bool)
 
-    with rasterio.open(ensemble_raster_path) as lc_src, rasterio.open(lst_bicubic10_raster_path) as lst_src:
+    with rasterio.open(hybrid_raster_path) as lc_src, rasterio.open(lst_bicubic10_raster_path) as lst_src:
         for idx in range(n_patches):
             row, col = idx // patches_per_row, idx % patches_per_row
             window = rasterio.windows.Window(col * patch_size, row * patch_size, patch_size, patch_size)

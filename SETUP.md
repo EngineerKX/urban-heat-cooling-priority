@@ -195,7 +195,7 @@ target (`GCS_MODEL_BUCKET`, defaults to reusing this one — see `.env.example`)
 ## 8. Land-cover baseline: Random Forest
 
 Before touching U-Net/CNN at all, the Random Forest classifier needs to
-exist locally — it's a hard prerequisite for the land-cover ensemble
+exist locally — it's a hard prerequisite for the land-cover hybrid
 (§9d below combines RF's + U-Net's probability rasters), and it's
 simpler to get running first since it needs no GPU, no Colab, and trains
 server-side on Earth Engine in a couple of minutes.
@@ -232,9 +232,9 @@ yet on your machine:
 ```
 
 `--with-probabilities` is required here specifically because the
-ensemble step (§9d) needs RF's per-class probability raster, not just
+hybrid step (§9d) needs RF's per-class probability raster, not just
 its hard classified labels — without this flag you'd only get the
-classified raster and the ensemble build would fail with a missing-file
+classified raster and the hybrid build would fail with a missing-file
 error later. This step needs `GEE_EXPORT_BUCKET` set (§7) since it
 exports the classified/probability rasters via Cloud Storage. Takes a
 few minutes — training happens server-side on Earth Engine (`ee.Classifier`),
@@ -296,9 +296,9 @@ you relabel/rebuild them) — Colab can't produce these on its own:
 # the hand-labeled validation sample (needed by train_unet.ipynb)
 python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, VALIDATION_SAMPLE_GCS_PREFIX; gcs.upload_file('data/interim/validation_sample/validation_sample_300_labeled.csv', GCS_MODEL_BUCKET, f'{VALIDATION_SAMPLE_GCS_PREFIX}.csv')"
 
-# the land-cover ensemble raster (needed by train_heat_cnn.ipynb, after
-# you've trained U-Net and run scripts/build_landcover_ensemble.py locally)
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, ENSEMBLE_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/ensemble_landcover.tif', GCS_MODEL_BUCKET, f'{ENSEMBLE_RASTER_GCS_PREFIX}.tif')"
+# the land-cover hybrid raster (needed by train_heat_cnn.ipynb, after
+# you've trained U-Net and run scripts/build_landcover_hybrid.py locally)
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, HYBRID_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/hybrid_landcover.tif', GCS_MODEL_BUCKET, f'{HYBRID_RASTER_GCS_PREFIX}.tif')"
 ```
 
 ### 9d. Run the notebooks, then pull the results locally
@@ -311,12 +311,12 @@ machine:
 ```
 python scripts/pull_models.py --model unet
 python scripts/run_landcover_unet_inference.py
-python scripts/build_landcover_ensemble.py
+python scripts/build_landcover_hybrid.py
 ```
 
 This downloads the trained weights (hash-verified), imports the run into
 your local MLflow store, runs full-Singapore CPU inference, and rebuilds
-the ensemble raster — which `train_heat_cnn.ipynb` needs (push it per §9c
+the hybrid raster — which `train_heat_cnn.ipynb` needs (push it per §9c
 first). Then run that notebook the same way, and locally:
 
 ```

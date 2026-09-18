@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Standalone verification for src/landcover/zonal.py against a small
 synthetic in-memory GeoTIFF -- no GEE/GPU required. Same style as
-tests/test_landcover_ensemble.py: runnable script, plain asserts, printed
+tests/test_landcover_hybrid.py: runnable script, plain asserts, printed
 pass/fail (this repo has no pytest convention).
 
 Usage: python tests/test_landcover_zonal.py
@@ -28,7 +28,7 @@ CLASS_NAMES = {1: "vegetation", 2: "built_up", 3: "bare", 4: "water"}
 
 def _write_label_raster(path):
     """4x4 uint8 raster: top-left 2x2 = vegetation, top-right 2x2 = built_up,
-    bottom half (2x4) = 0 (nodata), matching the ensemble raster's own
+    bottom half (2x4) = 0 (nodata), matching the hybrid raster's own
     0=nodata / 1..4=bucket convention."""
     band = np.zeros((4, 4), dtype=np.uint8)
     band[0:2, 0:2] = 1  # vegetation
@@ -84,7 +84,7 @@ def test_zonal_class_fractions_pure_and_mixed_and_offraster(tmp_dir):
 
 def test_zonal_class_fractions_reprojects_mismatched_crs(tmp_dir):
     """Production callers (pillars.py) pass subzones in EPSG:4326 while the
-    ensemble raster is EPSG:32648 -- this exercises that exact reprojection
+    hybrid raster is EPSG:32648 -- this exercises that exact reprojection
     path and checks it recovers the same result as passing the raster's
     native CRS directly."""
     raster_path = tmp_dir / "labels_reproj.tif"

@@ -1,8 +1,12 @@
-"""Soft-voting ensemble combining the RF and U-Net land-cover classifiers
-(Track B / EN1): averages each model's per-class probability raster onto a
-common grid, then argmax -> a single full-Singapore ensemble raster. The
-formal RF-vs-U-Net-vs-ensemble evaluation (validation/landcover_validation/)
-scores all three identically once this exists.
+"""Soft-voting hybrid combining the RF and U-Net land-cover classifiers
+(Track B / EN1) -- a *hybrid* model in the strict sense (two different
+model types, RF + CNN, working together), not an *ensemble* in the
+strict sense (which combines multiple instances of the SAME model type,
+e.g. Random Forest's own bagged decision trees). Averages each model's
+per-class probability raster onto a common grid, then argmax -> a single
+full-Singapore hybrid raster. The formal RF-vs-U-Net-vs-hybrid evaluation
+(validation/landcover_validation/) scores all three identically once this
+exists.
 
 Both prob rasters carry an explicit `valid_mask` band from their own
 inference paths (see rf_baseline.py::classify_probability,
@@ -23,8 +27,8 @@ from rasterio.warp import reproject
 from config.settings import PROCESSED_DIR
 from src.ingest.worldcover import BUCKET_NAMES
 
-ENSEMBLE_RASTER_PATH = PROCESSED_DIR / "landcover" / "ensemble_landcover.tif"
-ENSEMBLE_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "ensemble_landcover_prob.tif"
+HYBRID_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"
+HYBRID_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover_prob.tif"
 
 N_CLASSES = len(BUCKET_NAMES)
 
@@ -92,8 +96,8 @@ def probabilities_to_hard_labels(avg_prob, combined_valid):
     return label_array
 
 
-def export_ensemble_rasters(avg_prob, combined_valid, label_array, ref_transform, ref_crs,
-                             label_out_path=ENSEMBLE_RASTER_PATH, prob_out_path=ENSEMBLE_PROB_RASTER_PATH):
+def export_hybrid_rasters(avg_prob, combined_valid, label_array, ref_transform, ref_crs,
+                           label_out_path=HYBRID_RASTER_PATH, prob_out_path=HYBRID_PROB_RASTER_PATH):
     label_out_path = Path(label_out_path)
     label_out_path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(
@@ -101,7 +105,7 @@ def export_ensemble_rasters(avg_prob, combined_valid, label_array, ref_transform
         count=1, dtype=label_array.dtype, crs=ref_crs, transform=ref_transform,
     ) as dst:
         dst.write(label_array, 1)
-    print(f"Ensemble raster written to {label_out_path}")
+    print(f"Hybrid raster written to {label_out_path}")
 
     class_values = sorted(BUCKET_NAMES.keys())
     band_names = [f"prob_{BUCKET_NAMES[v]}" for v in class_values] + ["valid_mask"]
@@ -115,18 +119,18 @@ def export_ensemble_rasters(avg_prob, combined_valid, label_array, ref_transform
             dst.write(avg_prob[i], i + 1)
         dst.write(combined_valid.astype(np.float32), N_CLASSES + 1)
         dst.descriptions = tuple(band_names)
-    print(f"Ensemble probability raster written to {prob_out_path}")
+    print(f"Hybrid probability raster written to {prob_out_path}")
     return label_out_path, prob_out_path
 
 
-def build_ensemble(rf_prob_path, unet_prob_path, label_out_path=ENSEMBLE_RASTER_PATH,
-                    prob_out_path=ENSEMBLE_PROB_RASTER_PATH):
+def build_hybrid(rf_prob_path, unet_prob_path, label_out_path=HYBRID_RASTER_PATH,
+                  prob_out_path=HYBRID_PROB_RASTER_PATH):
     """Top-level orchestrator. RF's own raster grid is the reference: it's
     exported straight from the real boundary geometry (export_geotiff_to_gcs),
     while U-Net's grid is an artifact of the rectangular patch-export
     mechanism -- reprojecting U-Net onto RF's grid (not the other way)
-    keeps the ensemble on the same footprint convention as the pre-existing
-    RF raster already in the repo."""
+    keeps the hybrid raster on the same footprint convention as the
+    pre-existing RF raster already in the repo."""
     with rasterio.open(rf_prob_path) as ref:
         ref_transform, ref_crs, ref_shape = ref.transform, ref.crs, (ref.height, ref.width)
 
@@ -147,6 +151,6 @@ def build_ensemble(rf_prob_path, unet_prob_path, label_out_path=ENSEMBLE_RASTER_
         print(f"Averaged probability sum at valid pixels: mean={prob_sums.mean():.4f} (expect ~1.0)")
 
     label_array = probabilities_to_hard_labels(avg_prob, combined_valid)
-    return export_ensemble_rasters(
+    return export_hybrid_rasters(
         avg_prob, combined_valid, label_array, ref_transform, ref_crs, label_out_path, prob_out_path,
     )

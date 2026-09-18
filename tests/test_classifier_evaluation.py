@@ -3,7 +3,7 @@
 validation/landcover_validation/classifier_evaluation.py against a small
 synthetic raster + hand-built validation points -- no GEE/GPU required.
 Same "runnable script, printed pass/fail" convention as
-tests/test_landcover_ensemble.py (see that file for why no pytest).
+tests/test_landcover_hybrid.py (see that file for why no pytest).
 
 Usage: python tests/test_classifier_evaluation.py
 """

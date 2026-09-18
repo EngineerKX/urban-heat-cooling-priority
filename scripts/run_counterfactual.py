@@ -88,7 +88,7 @@ def run_cnn_counterfactual(subzone_id: str, lon: float, lat: float, radius_m: fl
     from src.heat_model.cnn_data import build_local_feature_target_patches
     from src.heat_model.cnn_infer import load_cnn_regressor, locate_patch_and_pixel
     from src.heat_model.counterfactual import class_mean_feature_vectors, rescale_subzone_delta, run_patch_counterfactual
-    from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+    from src.landcover.hybrid import HYBRID_RASTER_PATH
 
     if not CNN_MODEL_SAVE_PATH.exists():
         print(f"⚠️  {CNN_MODEL_SAVE_PATH} not found — train it via notebooks/colab_training/train_heat_cnn.ipynb, "
@@ -98,7 +98,7 @@ def run_cnn_counterfactual(subzone_id: str, lon: float, lat: float, radius_m: fl
     inference_patch_dir = INTERIM_DIR / "unet_patches" / "inference"
     mixer_json_path = inference_patch_dir / "unet_inference.json"
     lst_bicubic10_path = INTERIM_DIR / "lst_bicubic10_full.tif"
-    if not (mixer_json_path.exists() and lst_bicubic10_path.exists() and ENSEMBLE_RASTER_PATH.exists()):
+    if not (mixer_json_path.exists() and lst_bicubic10_path.exists() and HYBRID_RASTER_PATH.exists()):
         print("⚠️  Missing patch/raster inputs for the CNN counterfactual — skipping.")
         return None
 
@@ -109,7 +109,7 @@ def run_cnn_counterfactual(subzone_id: str, lon: float, lat: float, radius_m: fl
 
     print("\nBuilding local feature/target patches (rasterio reprojection, no GEE call) ...")
     X, _y, valid_mask = build_local_feature_target_patches(
-        inference_patch_dir, mixer_json_path, ENSEMBLE_RASTER_PATH, lst_bicubic10_path,
+        inference_patch_dir, mixer_json_path, HYBRID_RASTER_PATH, lst_bicubic10_path,
     )
     class_means = class_mean_feature_vectors(X, valid_mask=valid_mask)
 

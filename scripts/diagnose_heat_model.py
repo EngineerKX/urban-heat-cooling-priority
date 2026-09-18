@@ -44,7 +44,7 @@ from src.heat_model.tabular import (
     predict_counterfactual_subzone,
 )
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
-from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.utils.experiment_tracking import HEAT_MODEL_EXPERIMENT_NAME, start_run
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
@@ -107,7 +107,7 @@ def main():
 
         print("\nBuilding local feature/target patches for the demo examples ...")
         X, _y, valid_mask = build_local_feature_target_patches(
-            INFERENCE_PATCH_DIR, MIXER_JSON_PATH, ENSEMBLE_RASTER_PATH, LST_BICUBIC10_PATH,
+            INFERENCE_PATCH_DIR, MIXER_JSON_PATH, HYBRID_RASTER_PATH, LST_BICUBIC10_PATH,
         )
         class_means = class_mean_feature_vectors(X, valid_mask=valid_mask)
         cnn_model = load_cnn_regressor(CNN_MODEL_SAVE_PATH)

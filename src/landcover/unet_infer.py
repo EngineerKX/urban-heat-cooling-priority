@@ -45,7 +45,7 @@ def run_inference_and_reconstruct(model, inference_patch_dir, boundary, patch_si
     pixels back to nodata (0) after reconstruction, matching RF's behavior.
 
     `also_write_probabilities=True` persists the per-class softmax array
-    (needed for the soft-voting ensemble) into a second 5-band GeoTIFF
+    (needed for the soft-voting hybrid) into a second 5-band GeoTIFF
     instead of discarding it.
     """
     import rasterio

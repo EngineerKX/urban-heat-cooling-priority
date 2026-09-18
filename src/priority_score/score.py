@@ -22,7 +22,7 @@ def build_score(
 
     `adaptive_capacity_col` defaults to "greenery_fraction" so every
     existing call site is unaffected; pass a different column name to
-    compare the NDVI-threshold vs. land-cover-ensemble adaptive-capacity
+    compare the NDVI-threshold vs. land-cover-hybrid adaptive-capacity
     sources (see config.settings.ADAPTIVE_CAPACITY_SOURCE) without
     duplicating this function.
 

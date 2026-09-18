@@ -47,7 +47,7 @@ checks = [
     ("Validation sample (labeled)", INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"),
     ("RF land cover raster", PROCESSED_DIR / "landcover" / "rf_landcover.tif"),
     ("U-Net land cover raster", PROCESSED_DIR / "landcover" / "unet_landcover.tif"),
-    ("Land-cover ensemble raster", PROCESSED_DIR / "landcover" / "ensemble_landcover.tif"),
+    ("Land-cover hybrid raster", PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"),
     ("S4 hotspot clusters", PROCESSED_DIR / "hotspot_clusters.csv"),
     ("S5 XGBoost heat model", PROCESSED_DIR / "heat_model" / "xgb_model.pkl"),
     ("S5 CNN heat model", CNN_MODEL_SAVE_PATH),

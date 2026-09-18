@@ -1,4 +1,4 @@
-"""Formal RF-vs-U-Net-vs-ensemble land-cover evaluation: confusion matrix,
+"""Formal RF-vs-U-Net-vs-hybrid land-cover evaluation: confusion matrix,
 per-class precision/recall/F1, macro/weighted F1 -- scored identically for
 all three classifiers against the same hand-labeled validation points.
 
@@ -28,7 +28,7 @@ def sample_raster_at_points(raster_path, validation_df: pd.DataFrame, band: int 
     Reads the CRS directly off the raster file (unlike
     unet.py::informal_accuracy_check, which needs it passed in separately
     because it's called right after reconstruction) -- this is what lets one
-    function sample RF's, U-Net's, and the ensemble's already-written raster
+    function sample RF's, U-Net's, and the hybrid's already-written raster
     files identically."""
     with rasterio.open(raster_path) as src:
         raster_data = src.read(band)

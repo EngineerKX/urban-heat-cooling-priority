@@ -1,6 +1,6 @@
 """Per-subzone class-fraction zonal stats for a LOCAL categorical raster
-(the land-cover ensemble). Counterpart to src/utils/geo.py::zonal_mean,
-which only handles GEE ee.Image inputs -- the land-cover ensemble is a
+(the land-cover hybrid). Counterpart to src/utils/geo.py::zonal_mean,
+which only handles GEE ee.Image inputs -- the land-cover hybrid is a
 rasterio-readable local GeoTIFF instead, so it needs its own zonal tool
 rather than a round-trip back through Earth Engine.
 """
@@ -24,7 +24,7 @@ def zonal_class_fractions(
 ) -> pd.DataFrame:
     """Fraction of each land-cover class per subzone polygon, from a single-
     band categorical raster where 0 means nodata/invalid (see
-    src/landcover/ensemble.py's convention -- bucket ids are 1-indexed, 0 is
+    src/landcover/hybrid.py's convention -- bucket ids are 1-indexed, 0 is
     never a real class).
 
     Returns [subzone_id, fraction_<class> for each class_names value,

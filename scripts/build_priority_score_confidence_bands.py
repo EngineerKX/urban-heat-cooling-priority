@@ -24,7 +24,7 @@ from validation.score_validation.confidence_bands import (
     exposure_noise_std,
 )
 
-CONFUSION_MATRIX_PATH = PROCESSED_DIR / "landcover" / "evaluation" / "confusion_matrix_ensemble.csv"
+CONFUSION_MATRIX_PATH = PROCESSED_DIR / "landcover" / "evaluation" / "confusion_matrix_hybrid.csv"
 OUT_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
 

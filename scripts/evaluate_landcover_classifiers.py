@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Formal RF-vs-U-Net-vs-ensemble land-cover evaluation: confusion matrix,
+"""Formal RF-vs-U-Net-vs-hybrid land-cover evaluation: confusion matrix,
 per-class precision/recall/F1, macro/weighted F1, scored identically for
 all three classifiers against the same hand-labeled validation points.
 Replaces the ad hoc informal_accuracy_check() sanity checks each training
@@ -18,7 +18,7 @@ import pandas as pd
 
 from config.settings import INTERIM_DIR
 from config.settings import UNET_CLASSIFIED_RASTER_PATH as UNET_RASTER_PATH
-from src.landcover.ensemble import ENSEMBLE_RASTER_PATH
+from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.landcover.rf_baseline import RF_RASTER_PATH
 from src.utils.experiment_tracking import EXPERIMENT_NAME, start_run
 from validation.landcover_validation.classifier_evaluation import (
@@ -32,7 +32,7 @@ VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labe
 RASTERS = {
     "rf": RF_RASTER_PATH,
     "unet": UNET_RASTER_PATH,
-    "ensemble": ENSEMBLE_RASTER_PATH,
+    "hybrid": HYBRID_RASTER_PATH,
 }
 
 
@@ -46,7 +46,7 @@ def main():
             "train_landcover_rf.py --with-probabilities, "
             "the U-Net Colab notebook + pull_models.py + "
             "run_landcover_unet_inference.py --with-probabilities, and "
-            "build_landcover_ensemble.py first."
+            "build_landcover_hybrid.py first."
         )
 
     validation_df = pd.read_csv(VALIDATION_CSV)
@@ -61,7 +61,7 @@ def main():
 
     save_evaluation_outputs(results, comparison_df)
 
-    # One MLflow run per model (rf/unet/ensemble), tagged stage="evaluation"
+    # One MLflow run per model (rf/unet/hybrid), tagged stage="evaluation"
     # so they're distinguishable from the training runs of the same name --
     # this is the formal accuracy/macro-F1/per-class-F1 numbers, previously
     # only ever manually copied into backup SUMMARY.txt files, now a
