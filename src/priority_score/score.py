@@ -32,7 +32,19 @@ def build_score(
     unperturbed data so noisy draws are scored on the same scale as the
     point estimate.
 
-    `weighting="pca"` fits a fresh 1-component PCA on every call — the sign
+    `weighting="pca"` fits a fresh 1-component PCA on every call, on the
+    pillars STANDARDISED to z-scores (correlation-matrix PCA) -- but the score
+    itself aggregates the 0-1 min-max pillars with those weights, exactly like
+    the equal-weight mode, so the two differ only in the weights. Until
+    2026-09-19 the PCA ran on the min-max pillars directly, which made the
+    "data-derived" weights follow each pillar's SPREAD (a skewed pillar is
+    squeezed toward 0 by min-max and got a tiny weight) instead of how the
+    pillars co-vary: swapping the sensitivity pillar's population term from
+    count to density moved its weight 0.16 -> 0.45 with no change in its
+    correlation with the other pillars. Standardising first keeps the weights
+    stable (0.38 / 0.23 / 0.39 either way).
+
+    The fitted PCA's sign — the sign
     of the fitted loadings is aligned to the exposure loading only, so a
     pillar whose loading disagrees with exposure can come out negative,
     which INVERTS its contribution rather than just down-weighting it. This
@@ -56,8 +68,9 @@ def build_score(
         weights = {"exposure": 1 / 3, "sensitivity": 1 / 3, "adaptive_deficit": 1 / 3}
 
     elif weighting == "pca":
+        standardised = (pillars - pillars.mean()) / pillars.std(ddof=0).replace(0, 1)
         pca = PCA(n_components=1, random_state=seed)
-        pca.fit(pillars.values)
+        pca.fit(standardised.values)
         raw_weights = pca.components_[0]
         if raw_weights[0] < 0:
             raw_weights = -raw_weights

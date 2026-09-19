@@ -22,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 
-from config.settings import EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
+from config.settings import (
+    ADAPTIVE_CAPACITY_SOURCE, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, REFERENCE_VARIANT, TOP_N,
+)
 from src.priority_score.io import load_and_join
 from validation.score_validation.confidence_bands import (
     adaptive_capacity_noise_std,
@@ -30,7 +32,6 @@ from validation.score_validation.confidence_bands import (
     exposure_noise_std,
 )
 
-CONFUSION_MATRIX_PATH = PROCESSED_DIR / "landcover" / "evaluation" / "confusion_matrix_hybrid.csv"
 OUT_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
 # source name -> (held-out CSV, the script that builds it)
@@ -65,13 +66,13 @@ def main(force: bool = False):
           "between the held-out footprint and the subzone — see validation/score_validation/confidence_bands.py's "
           "module docstring.")
 
-    if CONFUSION_MATRIX_PATH.exists():
-        confusion_df = pd.read_csv(CONFUSION_MATRIX_PATH)
-        ac_std = adaptive_capacity_noise_std(confusion_df, class_name="vegetation")
-        print("⚠️  This counts vegetation RECALL only; the hybrid's larger built-up→vegetation error is not in the "
-              "noise model, so adaptive-capacity uncertainty is probably understated.")
+    other_greenery_col = "greenery_fraction_ndvi" if ADAPTIVE_CAPACITY_SOURCE == "landcover" else "greenery_fraction_landcover"
+    if other_greenery_col in df.columns:
+        ac_std = adaptive_capacity_noise_std(df, "greenery_fraction", other_greenery_col)
+        print("⚠️  A rough scale for per-subzone greenery error (two estimators that share the same imagery), not a "
+              "validated one — it moves the bands only ~10%, so no conclusion hinges on it.")
     else:
-        print(f"⚠️  {CONFUSION_MATRIX_PATH} not found — run scripts/evaluate_landcover_classifiers.py first. "
+        print(f"⚠️  '{other_greenery_col}' missing from the pillar table — run scripts/build_adaptive_capacity_pillar.py. "
               f"Bands will reflect exposure uncertainty only.")
         ac_std = None
 

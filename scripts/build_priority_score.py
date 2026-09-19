@@ -25,11 +25,16 @@ from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join
 from src.priority_score.score import build_score
 from validation.score_validation.rank_impact import run_rank_impact, run_weighting_comparison
+from validation.score_validation.sensitivity_specs import (
+    REQUIRED_COLUMNS as SPEC_REQUIRED_COLUMNS,
+    run_sensitivity_spec_comparison,
+)
 
 PRIORITY_SCORE_OUT = PROCESSED_DIR / "priority_score.csv"
 RANK_IMPACT_OUT_TEMPLATE = PROCESSED_DIR / "rank_impact_results_{weighting}.csv"
 WEIGHTING_COMPARISON_OUT = PROCESSED_DIR / "weighting_comparison.csv"
 WEIGHTING_MEMBERSHIP_OUT = PROCESSED_DIR / f"weighting_comparison_top{TOP_N}_membership.csv"
+SENSITIVITY_SPEC_OUT = PROCESSED_DIR / "sensitivity_spec_comparison.csv"
 
 
 def main(toy_mode: bool = False):
@@ -50,6 +55,15 @@ def main(toy_mode: bool = False):
     if membership_df is not None:
         membership_df.to_csv(WEIGHTING_MEMBERSHIP_OUT, index=False)
         print(f"Saved: {WEIGHTING_MEMBERSHIP_OUT}")
+
+    print("\n=== Sensitivity-pillar specification comparison (formula uncertainty, not noise) ===")
+    if all(c in df.columns for c in SPEC_REQUIRED_COLUMNS):
+        spec_df = run_sensitivity_spec_comparison(df)
+        spec_df.to_csv(SENSITIVITY_SPEC_OUT, index=False)
+        print(f"Saved: {SENSITIVITY_SPEC_OUT}")
+    else:
+        print("⚠️  Skipped — the pillar table lacks the population/area columns this needs "
+              "(toy mode, or rebuild with scripts/build_sensitivity_pillar.py --force).")
 
     print(f"\n=== Production priority score (reference variant: {REFERENCE_VARIANT}, PCA-weighted) ===")
     score, weights = build_score(df, REFERENCE_VARIANT, "pca")

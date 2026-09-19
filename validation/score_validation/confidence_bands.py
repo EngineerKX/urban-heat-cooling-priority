@@ -9,9 +9,14 @@ approach was rejected). Two noise sources:
   The score min-max-normalizes exposure, so a constant offset can't move any
   rank; only the spread around it is noise. The held-out source is
   config.settings.EXPOSURE_NOISE_SOURCE (MODIS by default).
-- Adaptive capacity: the land-cover hybrid's own vegetation-class recall
-  binomial standard error, from its confusion matrix (already produced by
-  scripts/evaluate_landcover_classifiers.py).
+- Adaptive capacity: the per-subzone disagreement between the two greenery
+  estimates already in the pipeline (land-cover hybrid vs. NDVI-threshold
+  proxy), as the residual std after regressing one on the other
+  (`adaptive_capacity_noise_std`). A CONSTANT misclassification rate is an
+  affine distortion of greenery that the score's min-max normalization
+  cancels exactly (checked: max score change 4e-16), so only per-subzone
+  HETEROGENEITY of error can move a rank -- which the hybrid's global recall
+  standard error (what this module used before 2026-09-19) never measured.
 
 Every noisy draw is scored against the UNperturbed data's normalization
 range (build_score's `reference_df`). Re-normalizing each draw against its
@@ -26,27 +31,31 @@ planner actually acts on (which N to fund), which score-unit bands alone
 don't give.
 
 STATED LIMITATIONS (not silent omissions):
-- The sensitivity pillar is deliberately left UNPERTURBED -- no validation-
-  error estimate exists anywhere in this repo for SingStat population data,
-  and inventing one would be exactly the ungrounded approach already
-  rejected for the other two pillars. The bands reflect exposure +
-  adaptive-capacity uncertainty only.
+- The sensitivity pillar is deliberately left UNPERTURBED, and its
+  uncertainty is not missing from the picture, it is a different KIND: the
+  SingStat counts are near-exact administrative data, so there is no
+  measurement noise to bootstrap; what is uncertain is the FORMULA (count vs.
+  density, the population/elderly split, which elderly measure). That is
+  reported separately as a decision-level table
+  (validation/score_validation/sensitivity_specs.py). The bands therefore
+  cover measurement noise in exposure and adaptive capacity only, not
+  formula choices.
 - The exposure noise is an UPPER bound on random error: the residual spread
   also contains the mismatch between the held-out footprint (MODIS is 1km,
   far larger than most subzones) and the subzone itself. With the NEA source
   it is estimated from only ~12 subzones.
-- The adaptive-capacity noise counts only vegetation RECALL. The hybrid's
-  bigger error is built-up labelled as vegetation (low vegetation
-  PRECISION), which inflates greenery and is not in this noise model, so
-  the bands probably understate adaptive-capacity uncertainty. Not
-  quantified (the validation sample is stratified, so its raw counts aren't
-  island-representative).
+- The adaptive-capacity noise is a rough scale, not a validated one: the
+  NDVI proxy is itself a crude estimate (it can be wrong where the hybrid is
+  right), yet it shares the hybrid's Sentinel-2 imagery, so common-mode
+  errors cancel out of the residual. It is ~2.3x the old recall-based value
+  but moves the bands by only ~10%, so no conclusion hinges on it.
 - These are validation-error-based bands, not statistically CALIBRATED ones:
   their coverage was never tested against ground truth.
 """
 
 import numpy as np
 import pandas as pd
+from scipy.stats import linregress
 
 from config.settings import (
     PRIORITY_SCORE_BAND_QUANTILES, PRIORITY_SCORE_BOOTSTRAP_ITERATIONS, RANDOM_SEED, TOP_N,
@@ -82,24 +91,26 @@ def exposure_noise_std(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFram
     return std
 
 
-def adaptive_capacity_noise_std(confusion_matrix_df: pd.DataFrame, class_name: str = "vegetation") -> float:
-    """Binomial standard error of `class_name`'s recall, computed directly
-    from the confusion matrix's own counts (first column holds
-    'true:<class>' row labels, other columns 'pred:<class>')."""
-    true_col = f"true:{class_name}"
-    label_col = confusion_matrix_df.columns[0]
-    row = confusion_matrix_df[confusion_matrix_df[label_col] == true_col]
-    if row.empty:
-        raise ValueError(f"'{true_col}' not found in confusion matrix's '{label_col}' column.")
+def adaptive_capacity_noise_std(df: pd.DataFrame, greenery_col: str, reference_col: str) -> float:
+    """Per-subzone greenery noise: the std of `greenery_col`'s residuals after
+    regressing it on an independent estimate of the same quantity
+    (`reference_col`), i.e. how much the two estimators disagree on a subzone
+    once any systematic (affine) relationship between them is removed. NaN if
+    fewer than 3 subzones have both values.
 
-    pred_cols = [c for c in confusion_matrix_df.columns if c.startswith("pred:")]
-    counts = row[pred_cols].iloc[0]
-    n = int(counts.sum())
-    tp = int(counts[f"pred:{class_name}"])
-    recall = tp / n if n else float("nan")
-    std = float(np.sqrt(recall * (1 - recall) / n)) if n else float("nan")
+    Not the hybrid's recall standard error (what this returned before
+    2026-09-19): see the module docstring for why only per-subzone
+    heterogeneity can move a rank.
+    """
+    both = df[[greenery_col, reference_col]].dropna()
+    if len(both) < 3:
+        return np.nan
 
-    print(f"Adaptive-capacity noise model: {class_name} recall={recall:.3f} (n={n}), binomial SE={std:.4f}")
+    fit = linregress(both[reference_col], both[greenery_col])
+    residual = both[greenery_col] - (fit.intercept + fit.slope * both[reference_col])
+    std = float(residual.std(ddof=2))
+    print(f"Adaptive-capacity noise model: {greenery_col} vs {reference_col} over {len(both)} subzones, "
+          f"R²={fit.rvalue ** 2:.3f}, residual std={std:.4f}")
     return std
 
 
@@ -170,7 +181,7 @@ def bootstrap_priority_score(
           f"(0.1-0.9), {int((p <= 0.1).sum())} <=0.1.")
     if not has_adaptive_noise:
         print("⚠️  No adaptive-capacity noise model was supplied — bands reflect exposure uncertainty only.")
-    print("⚠️  Sensitivity pillar is never perturbed — no validation-error estimate exists for it in this repo "
-          "(see module docstring). Bands understate true uncertainty to that extent; stated limitation, not a gap.")
+    print("ℹ️  Sensitivity pillar is not perturbed: its uncertainty is formula choice, not noise — see the "
+          "sensitivity-specification table (validation/score_validation/sensitivity_specs.py) and the module docstring.")
 
     return result

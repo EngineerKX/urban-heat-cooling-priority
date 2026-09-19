@@ -83,6 +83,18 @@ with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", exp
     else:
         st.caption(f"`{weighting_path}` not found — run `python scripts/build_priority_score.py` first.")
 
+    spec_path = PROCESSED_DIR / "sensitivity_spec_comparison.csv"
+    if spec_path.exists():
+        st.markdown("**Sensitivity specification (formula uncertainty)**")
+        st.dataframe(pd.read_csv(spec_path), use_container_width=True, hide_index=True)
+        st.caption(
+            f"The sensitivity pillar has no measurement noise to bootstrap (SingStat counts are near-exact); its "
+            f"uncertainty is how the counts become a score. Each row changes only that formula and reports how many "
+            f"of the top-{TOP_N} subzones move versus the production score."
+        )
+    else:
+        st.caption(f"`{spec_path}` not found — run `python scripts/build_priority_score.py` first.")
+
     heat_variant_plot = DIAGNOSTICS_DIR / "heat_variant_diagnostic.png"
     if heat_variant_plot.exists():
         st.image(str(heat_variant_plot), caption="Heat-variant diagnostic")
@@ -187,12 +199,13 @@ with st.expander("S6 — confidence bands", expanded=False):
         st.dataframe(top20, use_container_width=True, hide_index=True)
         st.caption(
             f"Bootstrapped from the offset-removed spread of Landsat LST vs the {EXPOSURE_NOISE_SOURCE.upper()} "
-            f"held-out source (exposure) + land-cover hybrid vegetation-recall SE (adaptive capacity) — NOT the "
-            f"sensitivity pillar (no validation-error estimate exists for it). Exposure noise is an upper bound (it "
-            f"also contains the held-out footprint's mismatch with the subzone) and the adaptive-capacity noise "
-            f"ignores the hybrid's built-up→vegetation error, so read the bands as rough, not tight. `{p_col}` is "
-            f"the share of bootstrap draws in which a subzone lands in the top {TOP_N}. These are validation-based "
-            f"bands, not statistically calibrated ones. See validation/score_validation/confidence_bands.py's docstring."
+            f"held-out source (exposure) + the hybrid-vs-NDVI-proxy greenery disagreement (adaptive capacity) — NOT "
+            f"the sensitivity pillar, whose uncertainty is formula choice, not noise (see the specification table "
+            f"in the rank-impact section). Exposure noise is an upper bound (it also contains the held-out "
+            f"footprint's mismatch with the subzone) and the greenery noise is a rough scale, so read the bands as "
+            f"rough, not tight. `{p_col}` is the share of bootstrap draws in which a subzone lands in the top "
+            f"{TOP_N}. These are validation-based bands, not statistically calibrated ones. See "
+            f"validation/score_validation/confidence_bands.py's docstring."
         )
     else:
         st.caption(f"`{bands_path}` not found — run `python scripts/build_priority_score_confidence_bands.py` first.")

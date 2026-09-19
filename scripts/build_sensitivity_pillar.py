@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """Build the sensitivity pillar (SingStat population + elderly proportion).
-Replaces sensitivity_pillar.ipynb.
+Replaces sensitivity_pillar.ipynb. The population term is residents per km²
+by default (subzone areas come from the cached URA polygons, no GEE call);
+both the count and density inputs are kept as columns in the output CSV.
 
 Usage: python scripts/build_sensitivity_pillar.py [--force]
 """
@@ -16,9 +18,11 @@ import pandas as pd
 from config.settings import (
     INTERIM_DIR,
     SENSITIVITY_ELDERLY_WEIGHT,
+    SENSITIVITY_POPULATION_MEASURE,
     SENSITIVITY_POPULATION_WEIGHT,
 )
-from src.priority_score.pillars import build_sensitivity_pillar
+from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
+from src.priority_score.pillars import build_sensitivity_pillar, subzone_areas_km2
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 OUT_PATH = INTERIM_DIR / "sensitivity_pillar.csv"
@@ -32,8 +36,10 @@ def main(force: bool = False):
         raise FileNotFoundError(f"{HEAT_CSV_PATH} not found — run scripts/build_heat_variants.py first.")
 
     heat_ids = pd.read_csv(HEAT_CSV_PATH)["subzone_id"]
-    sp_df = build_sensitivity_pillar(heat_ids)
-    print(f"\n⚠️  Reminder: {SENSITIVITY_POPULATION_WEIGHT}/{SENSITIVITY_ELDERLY_WEIGHT} population/elderly split "
+    areas = subzone_areas_km2(as_geodataframe(fetch_subzones_geojson()))
+    sp_df = build_sensitivity_pillar(heat_ids, areas)
+    print(f"\nPopulation term: {SENSITIVITY_POPULATION_MEASURE} (config.settings.SENSITIVITY_POPULATION_MEASURE).")
+    print(f"⚠️  Reminder: {SENSITIVITY_POPULATION_WEIGHT}/{SENSITIVITY_ELDERLY_WEIGHT} population/elderly split "
           f"is a placeholder, not a locked S6 decision.")
 
     print("\nTop 10 by sensitivity_raw:")

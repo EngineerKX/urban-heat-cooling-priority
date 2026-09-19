@@ -183,6 +183,17 @@ NDVI_VEGETATION_THRESHOLD = 0.35  # placeholder proxy until real S3 land-cover f
 SENSITIVITY_POPULATION_WEIGHT = 0.5  # placeholder 50/50 split vs elderly_proportion
 SENSITIVITY_ELDERLY_WEIGHT = 0.5
 
+# Population term of the sensitivity pillar: "density" (residents per km²) or
+# "count" (raw residents). DECIDED 2026-09-19: density -- a per-area measure like
+# the other two pillars (exposure is a subzone mean, greenery a fraction), and
+# the Singapore heat-health work this project cites (Cities paper "Urban heat
+# health risk assessment in Singapore...", abstract-level evidence only) weights
+# risk by elderly DENSITY and PROPORTION. It is a planning judgement, not noise:
+# it still moves several top-20 subzones, so the alternative is reported rather
+# than hidden (validation/score_validation/sensitivity_specs.py, dashboard
+# "Sensitivity specification" table). The 50/50 split above is still a placeholder.
+SENSITIVITY_POPULATION_MEASURE = "density"
+
 # Which greenery-fraction source feeds the adaptive-capacity pillar's
 # canonical `greenery_fraction` column: "landcover" (the validated RF/U-Net
 # hybrid, see src/landcover/zonal.py) or "ndvi" (the older NDVI-threshold

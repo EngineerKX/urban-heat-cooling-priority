@@ -66,18 +66,21 @@ def test_larger_noise_gives_wider_bands():
     print(f"PASS: larger noise widens bands (small={small['band_width'].mean():.4f}, large={large['band_width'].mean():.4f})")
 
 
-def test_adaptive_capacity_noise_std_binomial_se():
-    confusion = pd.DataFrame({
-        "Unnamed: 0": ["true:vegetation", "true:built_up", "true:bare", "true:water"],
-        "pred:vegetation": [90, 5, 1, 0],
-        "pred:built_up": [10, 80, 3, 1],
-        "pred:bare": [0, 5, 5, 0],
-        "pred:water": [0, 0, 1, 19],
-    })
-    std = adaptive_capacity_noise_std(confusion, class_name="vegetation")
-    expected = np.sqrt(0.9 * 0.1 / 100)
-    assert np.isclose(std, expected, atol=1e-6), f"expected binomial SE {expected:.4f}, got {std:.4f}"
-    print(f"PASS: adaptive_capacity_noise_std computes the correct binomial SE ({std:.4f})")
+def test_adaptive_capacity_noise_std_is_residual_spread_after_affine_fit():
+    rng = np.random.default_rng(0)
+    truth = rng.uniform(0, 1, size=400)
+    df = pd.DataFrame({"primary": 0.35 + 0.56 * truth, "reference": truth})  # a purely affine distortion
+
+    assert np.isclose(adaptive_capacity_noise_std(df, "primary", "reference"), 0.0, atol=1e-9), (
+        "a constant misclassification rate is an affine map and must count as zero noise"
+    )
+
+    noisy = df.assign(primary=df["primary"] + rng.normal(0, 0.05, size=400))
+    std = adaptive_capacity_noise_std(noisy, "primary", "reference")
+    assert 0.04 < std < 0.06, f"expected ~0.05 residual spread, got {std:.4f}"
+
+    assert np.isnan(adaptive_capacity_noise_std(df.head(2), "primary", "reference")), "fewer than 3 subzones -> NaN"
+    print(f"PASS: adaptive_capacity_noise_std ignores an affine distortion and recovers injected spread ({std:.4f})")
 
 
 def test_bootstrap_is_not_biased_by_renormalisation():
@@ -160,7 +163,7 @@ def main():
     test_zero_noise_collapses_quantiles_to_point_estimate()
     test_nonzero_noise_gives_monotonic_quantiles()
     test_larger_noise_gives_wider_bands()
-    test_adaptive_capacity_noise_std_binomial_se()
+    test_adaptive_capacity_noise_std_is_residual_spread_after_affine_fit()
     test_bootstrap_is_not_biased_by_renormalisation()
     test_p_top_n_invariants()
     test_exposure_noise_std_removes_constant_offset()
