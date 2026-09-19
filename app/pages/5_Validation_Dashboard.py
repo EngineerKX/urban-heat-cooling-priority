@@ -17,7 +17,7 @@ import plotly.express as px
 import streamlit as st
 from scipy.stats import spearmanr
 
-from config.settings import CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, INTERIM_DIR, PROCESSED_DIR, VARIANT_COLUMNS
+from config.settings import CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS
 from validation.score_validation.rank_impact import rmse_vs_heldout
 
 st.set_page_config(page_title="Validation Dashboard — Urban Heat & Cooling Priority", page_icon="✅", layout="wide")
@@ -64,6 +64,22 @@ with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", exp
             st.dataframe(pd.read_csv(path), use_container_width=True, hide_index=True)
         else:
             st.caption(f"`{path}` not found — run `python scripts/build_priority_score.py` first.")
+
+    weighting_path = PROCESSED_DIR / "weighting_comparison.csv"
+    membership_path = PROCESSED_DIR / f"weighting_comparison_top{TOP_N}_membership.csv"
+    if weighting_path.exists():
+        st.markdown("**PCA vs. equal weighting (C1 benchmark)**")
+        st.dataframe(pd.read_csv(weighting_path), use_container_width=True, hide_index=True)
+        if membership_path.exists():
+            membership_df = pd.read_csv(membership_path)
+            changed_df = membership_df[membership_df["status"] != "both"]
+            st.caption(
+                f"Top-{TOP_N} subzones that appear under only one weighting (reference heat layer) — "
+                f"{len(changed_df)} of {len(membership_df)} subzones in either top-{TOP_N}."
+            )
+            st.dataframe(changed_df, use_container_width=True, hide_index=True)
+    else:
+        st.caption(f"`{weighting_path}` not found — run `python scripts/build_priority_score.py` first.")
 
     heat_variant_plot = DIAGNOSTICS_DIR / "heat_variant_diagnostic.png"
     if heat_variant_plot.exists():

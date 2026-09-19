@@ -6,7 +6,9 @@ Runs PCA (primary) and equal-weight (mandatory sensitivity check), per the
 locked eval rules, and additionally writes a single production
 `priority_score.csv` using the reference variant's PCA-weighted score —
 packaging the already-computed result for the app to consume, not new
-modeling.
+modeling. Also writes the PCA-vs-equal weighting comparison (the C1
+benchmark): how far the two weightings disagree on the ranking, and which
+top-N subzones each one adds or removes.
 
 Usage: python scripts/build_priority_score.py [--toy]
 """
@@ -19,13 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
 
-from config.settings import PROCESSED_DIR, REFERENCE_VARIANT
+from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join
 from src.priority_score.score import build_score
-from validation.score_validation.rank_impact import run_rank_impact
+from validation.score_validation.rank_impact import run_rank_impact, run_weighting_comparison
 
 PRIORITY_SCORE_OUT = PROCESSED_DIR / "priority_score.csv"
 RANK_IMPACT_OUT_TEMPLATE = PROCESSED_DIR / "rank_impact_results_{weighting}.csv"
+WEIGHTING_COMPARISON_OUT = PROCESSED_DIR / "weighting_comparison.csv"
+WEIGHTING_MEMBERSHIP_OUT = PROCESSED_DIR / f"weighting_comparison_top{TOP_N}_membership.csv"
 
 
 def main(toy_mode: bool = False):
@@ -38,6 +42,14 @@ def main(toy_mode: bool = False):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         results_df.to_csv(out_path, index=False)
         print(f"Saved: {out_path}")
+
+    print("\n=== PCA vs. equal weighting (C1 benchmark) ===")
+    weighting_df, membership_df = run_weighting_comparison(df)
+    weighting_df.to_csv(WEIGHTING_COMPARISON_OUT, index=False)
+    print(f"Saved: {WEIGHTING_COMPARISON_OUT}")
+    if membership_df is not None:
+        membership_df.to_csv(WEIGHTING_MEMBERSHIP_OUT, index=False)
+        print(f"Saved: {WEIGHTING_MEMBERSHIP_OUT}")
 
     print(f"\n=== Production priority score (reference variant: {REFERENCE_VARIANT}, PCA-weighted) ===")
     score, weights = build_score(df, REFERENCE_VARIANT, "pca")
