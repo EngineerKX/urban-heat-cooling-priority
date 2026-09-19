@@ -8,12 +8,36 @@ doesn't duplicate this join logic.
 import numpy as np
 import pandas as pd
 
-from config.settings import INTERIM_DIR, RANDOM_SEED, VARIANT_COLUMNS
+from config.settings import EXPOSURE_NOISE_SOURCE, INTERIM_DIR, RANDOM_SEED, VARIANT_COLUMNS
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 SENSITIVITY_CSV_PATH = INTERIM_DIR / "sensitivity_pillar.csv"
 ADAPTIVE_CSV_PATH = INTERIM_DIR / "adaptive_capacity_pillar.csv"
-HELDOUT_CSV_PATH = INTERIM_DIR / "nea_heldout_lst.csv"
+
+# held-out source name -> (its CSV, the script that builds it). Both share the
+# [subzone_id, lst_heldout_c] schema.
+HELDOUT_SOURCES = {
+    "modis": (INTERIM_DIR / "modis_heldout_lst.csv", "scripts/build_modis_heldout.py"),
+    "nea": (INTERIM_DIR / "nea_heldout_lst.csv", "scripts/build_nea_heldout.py"),
+}
+
+
+def load_heldout(source: str = EXPOSURE_NOISE_SOURCE, required: bool = False):
+    """The independent held-out LST table for `source` ("modis" or "nea";
+    default config.settings.EXPOSURE_NOISE_SOURCE) -- the project's reference
+    for how Landsat exposure agrees with another measurement, and the source of
+    the S6 bootstrap's exposure-noise level. Returns None (with a printed note)
+    if the file is missing, or raises FileNotFoundError when `required`."""
+    if source not in HELDOUT_SOURCES:
+        raise ValueError(f"Unknown held-out source '{source}', expected one of {sorted(HELDOUT_SOURCES)}.")
+    path, build_script = HELDOUT_SOURCES[source]
+    if not path.exists():
+        message = f"{path} not found (held-out source '{source}') — run {build_script} first."
+        if required:
+            raise FileNotFoundError(message)
+        print(f"ℹ️  {message} The held-out agreement columns will be NaN.")
+        return None
+    return pd.read_csv(path)
 
 
 def make_toy_pillars(subzone_ids: pd.Series, seed: int = RANDOM_SEED):
@@ -51,8 +75,6 @@ def load_and_join(toy_mode: bool = False):
     if n_dropped:
         print(f"⚠️  {n_dropped} subzones dropped — check subzone_id spelling/casing across files.")
 
-    heldout = pd.read_csv(HELDOUT_CSV_PATH) if HELDOUT_CSV_PATH.exists() else None
-    if heldout is None:
-        print(f"ℹ️  {HELDOUT_CSV_PATH} not found — lst_rmse_heldout will be NaN (run scripts/build_nea_heldout.py to fill it in).")
+    heldout = load_heldout()
 
     return df, heldout

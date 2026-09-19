@@ -20,12 +20,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pandas as pd
-
 from config.settings import (
-    ADAPTIVE_CAPACITY_SOURCE, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, REFERENCE_VARIANT, TOP_N,
+    ADAPTIVE_CAPACITY_SOURCE, EXPOSURE_NOISE_SOURCE, PROCESSED_DIR, REFERENCE_VARIANT, TOP_N,
 )
-from src.priority_score.io import load_and_join
+from src.priority_score.io import load_and_join, load_heldout
 from validation.score_validation.confidence_bands import (
     adaptive_capacity_noise_std,
     bootstrap_priority_score,
@@ -34,33 +32,18 @@ from validation.score_validation.confidence_bands import (
 
 OUT_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
-# source name -> (held-out CSV, the script that builds it)
-HELDOUT_SOURCES = {
-    "modis": (INTERIM_DIR / "modis_heldout_lst.csv", "scripts/build_modis_heldout.py"),
-    "nea": (INTERIM_DIR / "nea_heldout_lst.csv", "scripts/build_nea_heldout.py"),
-}
-
 
 def main(force: bool = False):
     if OUT_PATH.exists() and not force:
         print(f"{OUT_PATH} already exists — skipping recompute (pass --force to rebuild).")
         return OUT_PATH
 
-    if EXPOSURE_NOISE_SOURCE not in HELDOUT_SOURCES:
-        raise ValueError(
-            f"Unknown EXPOSURE_NOISE_SOURCE '{EXPOSURE_NOISE_SOURCE}', expected one of {sorted(HELDOUT_SOURCES)}."
-        )
-    heldout_path, build_script = HELDOUT_SOURCES[EXPOSURE_NOISE_SOURCE]
-    if not heldout_path.exists():
-        # Not a soft warning: running with no exposure noise would silently produce far-too-tight bands.
-        raise FileNotFoundError(
-            f"{heldout_path} not found (exposure noise source '{EXPOSURE_NOISE_SOURCE}') — run {build_script} first."
-        )
-
+    # required=True is deliberate, not a soft warning: running with no exposure
+    # noise would silently produce far-too-tight bands.
+    heldout = load_heldout(required=True)
     df, _ = load_and_join(toy_mode=False)
-    heldout = pd.read_csv(heldout_path)
 
-    print(f"Exposure noise source: {EXPOSURE_NOISE_SOURCE} ({heldout_path.name})")
+    print(f"Exposure noise source: {EXPOSURE_NOISE_SOURCE}")
     exp_std = exposure_noise_std(df, REFERENCE_VARIANT, heldout)
     print("⚠️  This is an UPPER bound on random exposure error: the residual spread also contains the mismatch "
           "between the held-out footprint and the subzone — see validation/score_validation/confidence_bands.py's "

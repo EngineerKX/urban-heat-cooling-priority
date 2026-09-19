@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 """Read-only diagnostic comparing all 3 LST variants against the MODIS
-held-out table (RMSE + Spearman), alongside the existing NEA held-out
-comparison for context. Same "build vs. diagnose" split as
-scripts/diagnose_heat_variants.py. Reuses rank_impact.rmse_vs_heldout
-unmodified -- it already accepts any heldout df with an lst_heldout_c
-column, and both nea_heldout.py and modis_heldout.py produce exactly that.
+held-out table, alongside the NEA held-out comparison for context. Same
+"build vs. diagnose" split as scripts/diagnose_heat_variants.py. Uses
+rank_impact.heldout_agreement, which splits the disagreement into the
+systematic offset, the offset-removed spread and the rank correlation -- it
+accepts any held-out df with an lst_heldout_c column, and both
+nea_heldout.py and modis_heldout.py produce exactly that.
+
+RMSE is printed only in the last column, to make one point visible: it is
+almost exactly sqrt(offset^2 + spread^2), i.e. it mostly restates the
+systematic offset (which can't move a rank), so don't read it as accuracy.
 
 Usage: python scripts/diagnose_modis_crosscheck.py
 """
@@ -15,10 +20,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd
-from scipy.stats import spearmanr
 
 from config.settings import INTERIM_DIR, VARIANT_COLUMNS
-from validation.score_validation.rank_impact import rmse_vs_heldout
+from validation.score_validation.rank_impact import heldout_agreement
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 MODIS_CSV_PATH = INTERIM_DIR / "modis_heldout_lst.csv"
@@ -32,28 +36,29 @@ def main():
         raise FileNotFoundError(f"{HEAT_CSV_PATH} not found — run scripts/build_heat_variants.py first.")
 
     heat = pd.read_csv(HEAT_CSV_PATH)
-    modis = pd.read_csv(MODIS_CSV_PATH)
-    nea = pd.read_csv(NEA_CSV_PATH) if NEA_CSV_PATH.exists() else None
+    sources = {"MODIS": pd.read_csv(MODIS_CSV_PATH)}
+    if NEA_CSV_PATH.exists():
+        sources["NEA"] = pd.read_csv(NEA_CSV_PATH)
 
     rows = []
-    for variant in VARIANT_COLUMNS:
-        modis_rmse = rmse_vs_heldout(heat, variant, modis)
-        merged = heat[["subzone_id", variant]].merge(modis, on="subzone_id", how="inner")
-        modis_corr = spearmanr(merged[variant], merged["lst_heldout_c"])[0] if len(merged) > 1 else float("nan")
+    for source, heldout in sources.items():
+        for variant in VARIANT_COLUMNS:
+            a = heldout_agreement(heat, variant, heldout)
+            rows.append({
+                "source": source, "variant": variant, "n": a["n"], "mean_offset_c": a["mean_offset_c"],
+                "spread_c": a["spread_c"], "spearman": a["spearman"], "rmse_c (mostly offset)": a["rmse_c"],
+            })
 
-        row = {"variant": variant, "modis_rmse": modis_rmse, "modis_spearman": modis_corr, "n_modis": len(merged)}
-        if nea is not None:
-            row["nea_rmse"] = rmse_vs_heldout(heat, variant, nea)
-        rows.append(row)
-
-    results_df = pd.DataFrame(rows)
-    print(results_df.to_string(index=False, float_format=lambda x: "NaN" if pd.isna(x) else f"{x:.3f}"))
-    print("\n⚠️  MODIS RMSE compares 1km pixels against subzone-scale polygons — prefer the Spearman column. "
-          "See validation/input_validation/modis_heldout.py's module docstring for the full limitations.")
-    if nea is not None:
-        print("NEA RMSE is shown for context only — it has its own systematic air-temp-vs-LST offset "
-              "(see validation/input_validation/nea_heldout.py). The two cross-checks have DIFFERENT "
-              "failure modes, which is exactly why using both is more informative than either alone.")
+    print(pd.DataFrame(rows).to_string(index=False, float_format=lambda x: "NaN" if pd.isna(x) else f"{x:.3f}"))
+    print("\nRead mean_offset_c as a systematic gap (Landsat reads hotter than both references; it can't move a rank), "
+          "spread_c as the disagreement that CAN reorder subzones, and spearman as rank agreement — the numbers that "
+          "matter for a ranking tool. rmse_c is shown only to make visible that it mostly restates the offset.")
+    print("⚠️  MODIS compares 1km pixels against subzone-scale polygons, so spread_c is an upper bound on random error "
+          "— see validation/input_validation/modis_heldout.py's module docstring for the full limitations.")
+    if "NEA" in sources:
+        print("NEA is shown for context only: 12 subzones, and it measures air temperature, not surface temperature "
+              "(see validation/input_validation/nea_heldout.py). The two cross-checks have DIFFERENT failure modes, "
+              "which is exactly why using both is more informative than either alone.")
 
 
 if __name__ == "__main__":

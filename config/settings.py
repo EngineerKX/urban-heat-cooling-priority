@@ -213,7 +213,10 @@ RANDOM_SEED = 42
 PRIORITY_SCORE_BOOTSTRAP_ITERATIONS = 1000
 PRIORITY_SCORE_BAND_QUANTILES = (0.05, 0.50, 0.95)
 
-# Which held-out LST source sets the exposure noise level in the bootstrap:
+# Which held-out LST source is the project's independent reference for Landsat
+# exposure -- it sets the exposure noise level in the S6 bootstrap AND is the
+# source behind the held-out agreement columns of the rank-impact table
+# (src/priority_score/io.py::load_heldout):
 # "modis" (MOD11A2 -- same physical quantity as Landsat LST, ~329 subzones)
 # or "nea" (weather-station AIR temperature, only ~12 subzones). Either way
 # the noise is the std of (Landsat - held-out) residuals AFTER removing their

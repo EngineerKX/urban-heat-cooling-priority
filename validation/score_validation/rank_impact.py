@@ -15,6 +15,12 @@ from src.priority_score.score import build_score
 
 
 def rmse_vs_heldout(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFrame):
+    """RMSE of `exposure_col` against a held-out LST table. Not a quality
+    metric on its own: it folds in the SYSTEMATIC offset between the two
+    sources (Landsat LST reads ~11C hotter than NEA air temperature and ~6C
+    hotter than MODIS), which can't move any rank and dwarfs the real
+    disagreement. Prefer `heldout_agreement`, which reports the offset, the
+    offset-removed spread and the rank correlation separately."""
     if heldout is None:
         return np.nan
     merged = df[["subzone_id", exposure_col]].merge(
@@ -23,6 +29,44 @@ def rmse_vs_heldout(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFrame):
     if len(merged) == 0:
         return np.nan
     return float(np.sqrt(mean_squared_error(merged["lst_heldout_c"], merged[exposure_col])))
+
+
+def heldout_agreement(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFrame) -> dict:
+    """How well `exposure_col` agrees with an independent held-out LST table
+    (any df with subzone_id + lst_heldout_c), split into the parts that mean
+    different things:
+
+    - mean_offset_c: mean(exposure - held-out). Systematic (a different
+      sensor/quantity/time), and a constant offset can't move a rank because
+      the score min-max-normalizes exposure.
+    - spread_c: std of the residuals AFTER removing that offset -- the part
+      that can actually reorder subzones (an upper bound on random error,
+      since it also holds the held-out footprint's mismatch with a subzone).
+    - spearman: rank agreement, the metric that matters for a ranking tool.
+    - rmse_c: kept for reference only; sqrt(offset^2 + spread^2) almost
+      exactly, which is why it mostly reports the offset.
+    - n: subzones both tables cover.
+
+    NaN everywhere (n as counted) if there is no held-out table or fewer than
+    3 overlapping subzones.
+    """
+    empty = {"n": 0, "mean_offset_c": np.nan, "spread_c": np.nan, "spearman": np.nan, "rmse_c": np.nan}
+    if heldout is None:
+        return empty
+    merged = df[["subzone_id", exposure_col]].merge(
+        heldout[["subzone_id", "lst_heldout_c"]], on="subzone_id", how="inner",
+    ).dropna()
+    if len(merged) < 3:
+        return {**empty, "n": len(merged)}
+
+    residual = merged[exposure_col] - merged["lst_heldout_c"]
+    return {
+        "n": len(merged),
+        "mean_offset_c": float(residual.mean()),
+        "spread_c": float(residual.std(ddof=1)),
+        "spearman": float(spearmanr(merged[exposure_col], merged["lst_heldout_c"])[0]),
+        "rmse_c": float(np.sqrt((residual ** 2).mean())),
+    }
 
 
 def top_n_overlap(score_a: pd.Series, score_b: pd.Series, n: int = TOP_N) -> float:
@@ -36,7 +80,10 @@ def run_rank_impact(
     variant_columns=VARIANT_COLUMNS, reference_variant: str = REFERENCE_VARIANT, top_n: int = TOP_N,
 ) -> tuple[pd.DataFrame, dict]:
     """Returns (results_df, scores_by_variant). `results_df` has one row per
-    variant: lst_rmse_heldout, spearman_vs_<reference>, top<N>_overlap_vs_<reference>.
+    variant: how it agrees with the held-out LST table (heldout_n,
+    heldout_offset_c, heldout_spread_c, heldout_spearman -- see
+    `heldout_agreement`; deliberately NOT the RMSE, which mostly reports the
+    systematic offset), then spearman_vs_<reference>, top<N>_overlap_vs_<reference>.
     The reference-variant row is self-compared by construction
     (spearman=1.000, overlap=1.000) — it's the frozen baseline, not a result.
     """
@@ -49,12 +96,15 @@ def run_rank_impact(
     ref_score = scores[reference_variant]
     rows = []
     for variant in variant_columns:
-        rmse = rmse_vs_heldout(df, variant, heldout)
+        agreement = heldout_agreement(df, variant, heldout)
         corr, _ = spearmanr(scores[variant], ref_score)
         overlap = top_n_overlap(scores[variant], ref_score, top_n)
         rows.append({
             "variant": variant,
-            "lst_rmse_heldout": rmse,
+            "heldout_n": agreement["n"],
+            "heldout_offset_c": agreement["mean_offset_c"],
+            "heldout_spread_c": agreement["spread_c"],
+            "heldout_spearman": agreement["spearman"],
             f"spearman_vs_{reference_variant}": corr,
             f"top{top_n}_overlap_vs_{reference_variant}": overlap,
         })

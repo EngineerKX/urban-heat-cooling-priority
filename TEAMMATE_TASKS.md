@@ -1,5 +1,10 @@
 # Tasks for you
 
+> **Status, 2026-09-19:** Task 1 is done. The RF+U-Net land-cover combination is
+> called the **hybrid** throughout (not "ensemble"), and the U-Net/CNN are
+> TensorFlow/Keras again (Colab-trained `.keras` models). Numbers quoted below
+> are dated where they have moved.
+
 Five things, roughly in the order that makes sense to tackle them (1 feeds
 2, 2 feeds 3; 4 and 5 are more independent and can happen anytime). Each
 section is self-contained — you shouldn't need to jump between docs to get
@@ -46,7 +51,7 @@ go — easier for both of us to review/discuss before it lands.
 
 Be aware going in: the model choices in this pipeline (U-Net for
 land-cover segmentation, the XGBoost+CNN split for the heat model, RF+U-Net
-soft-voted for the ensemble) came out of AI-assisted sessions (Claude)
+soft-voted into the hybrid) came out of AI-assisted sessions (Claude)
 picking reasonable, standard defaults — not a from-scratch literature
 review comparing alternatives. That's not necessarily wrong, but it means
 nobody's actually checked whether these are the *best* choices for this
@@ -63,7 +68,7 @@ Worth spending some real time on before/alongside Task 3 (fine-tuning):
   how do others typically frame this — patch-based CNN regression (what
   we're doing), a different downscaling approach, something else entirely?
 - **Combining two classifiers' outputs (RF + U-Net)**: is a flat 50/50
-  probability average (what `build_landcover_ensemble.py` does) standard
+  probability average (what `build_landcover_hybrid.py` does) standard
   practice, or is there a better-justified way to combine two models
   besides an unweighted average?
 
@@ -75,34 +80,18 @@ differently, that's exactly the kind of thing Task 3/5 are for.
 
 ---
 
-## Task 1: Regenerate the validation sample at 300 points, then label it
+## Task 1: Regenerate the validation sample at 300 points, then label it — ✅ DONE
 
-### Step 0 — code change needed first (the sample size is currently hardcoded)
+This is finished: the sample is 300 points (`TOTAL_POINTS = 300`; files
+`data/interim/validation_sample/validation_sample_300*.csv/.geojson`), it has
+been labeled and relabeled (commits `0afe082`, `15c2935`, `eb35be7`), and it is
+already wired in as the canonical validation set
+(`config/settings.py::VALIDATION_SAMPLE_GCS_PREFIX`). Every code/filename
+change this task used to list under "Step 0" has been applied. Steps 1–3
+below are kept as a reference for anyone who needs to regenerate or relabel —
+a labeling-quality decision is still open (see Task 5).
 
-`TOTAL_POINTS = 200` is hardcoded in two places, and the number "200" is
-baked directly into filenames and a GCS path across the codebase. Before
-you can actually draw a 300-point sample, these need updating together
-(the two `TOTAL_POINTS` constants, and every `..._200...` filename/prefix
-renamed to `..._300...`):
-
-- `scripts/generate_validation_sample.py`:
-  - line `TOTAL_POINTS = 200` → `300`
-  - line `csv_path = OUT_DIR / "validation_sample_200.csv"` → `"validation_sample_300.csv"`
-  - line `export_labeling_table(labeling_df, OUT_DIR, prefix="validation_sample_200")` → `prefix="validation_sample_300"`
-- `app/pages/1_Label_Validation_Points.py`:
-  - line `TOTAL_POINTS = 200` → `300` (this file has its **own** separate copy of the constant, not shared with the script above)
-  - `SB1_OUTPUT_CSV`, `WORK_CSV`, `FINAL_CSV`, `FINAL_GEOJSON` — each has `"validation_sample_200..."` in it, rename all four to `"validation_sample_300..."`
-  - **Leave this one alone**: `attempts < TOTAL_POINTS * 200` — that `200` is an unrelated retry-budget multiplier (try up to 200× the target count of random draws before giving up), not the sample size. It'll naturally become `300 * 200` and that's correct.
-- `validation/input_validation/labeling_sample.py`: `def export_labeling_table(..., prefix: str = "validation_sample_200")` → default `"validation_sample_300"`
-- `config/settings.py`: `VALIDATION_SAMPLE_GCS_PREFIX = "training_inputs/validation_sample_200_labeled"` → `"training_inputs/validation_sample_300_labeled"`
-- `scripts/evaluate_landcover_classifiers.py`, `scripts/train_landcover_rf.py`, `scripts/run_landcover_unet_inference.py`: each has `VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_200_labeled.csv"` → change `200` to `300`
-- `notebooks/colab_training/train_unet.ipynb`: the cell with `VALIDATION_CSV = Path("data/interim/validation_sample/validation_sample_200_labeled.csv")` and the GCS-push command comment above it — both say `200`, change to `300`. (It's a notebook JSON file — if your editor won't let you edit cell source directly, ask, there's a scripted way to do it.)
-- `app/Home.py`: two status-list lines reference `validation_sample_200.csv` / `validation_sample_200_labeled.csv` — update both.
-- `SETUP.md`: a few prose mentions of `validation_sample_200_labeled.csv` (§8a, §9c) — update for consistency, not functionally required.
-
-Grep for `validation_sample_200\|TOTAL_POINTS` from the repo root before you start to confirm you've got everything — that's the exact search that produced this list.
-
-### Step 1 — draw the new 300-point sample
+### Step 1 — draw a 300-point sample (only if regenerating)
 
 ```
 .venv\Scripts\python.exe scripts\generate_validation_sample.py
@@ -197,7 +186,7 @@ disk, not saved between sessions).
 .venv\Scripts\python.exe scripts\train_landcover_rf.py --with-probabilities
 ```
 
-`--with-probabilities` is required — the later ensemble step needs RF's
+`--with-probabilities` is required — the later hybrid step needs RF's
 per-class probability raster, not just its hard classified labels.
 Trains server-side on Earth Engine (a couple of minutes), no GPU needed.
 Verify: `data/processed/landcover/rf_landcover.tif` and
@@ -226,21 +215,21 @@ Then, back on your own machine:
 ```
 python scripts/pull_models.py --model unet
 python scripts/run_landcover_unet_inference.py
-python scripts/build_landcover_ensemble.py
+python scripts/build_landcover_hybrid.py
 ```
 
 Downloads the trained weights (hash-verified), runs full-Singapore CPU
-inference, rebuilds the ensemble raster. Push that ensemble raster to GCS
+inference, rebuilds the hybrid raster. Push that hybrid raster to GCS
 (the CNN notebook needs it, can't make it itself):
 
 ```
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, ENSEMBLE_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/ensemble_landcover.tif', GCS_MODEL_BUCKET, f'{ENSEMBLE_RASTER_GCS_PREFIX}.tif')"
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, HYBRID_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/hybrid_landcover.tif', GCS_MODEL_BUCKET, f'{HYBRID_RASTER_GCS_PREFIX}.tif')"
 ```
 
 ### 2e. Train the CNN heat model (Colab)
 
 Same pattern: open `notebooks/colab_training/train_heat_cnn.ipynb`,
-connect to Colab GPU, run top to bottom (needs 2d's ensemble raster to
+connect to Colab GPU, run top to bottom (needs 2d's hybrid raster to
 already be pushed). Then locally:
 
 ```
@@ -251,7 +240,7 @@ python scripts/pull_models.py --model cnn
 
 The heat model (S5) is XGBoost (subzone-level) + CNN (patch-level) working
 together — 2c-2e above only covers the land-cover classifiers (RF/U-Net/
-ensemble) that feed *into* the heat model, not the heat model itself.
+hybrid) that feed *into* the heat model, not the heat model itself.
 XGBoost trains natively on Windows, no GPU/Colab needed:
 
 ```
@@ -264,11 +253,14 @@ XGBoost trains natively on Windows, no GPU/Colab needed:
 python scripts/evaluate_landcover_classifiers.py
 ```
 
-Prints formal accuracy/macro-F1/per-class F1 for RF, U-Net, and ensemble,
-scored against whatever validation CSV currently exists (the new 300-point
-one, once Task 1 is done). Expect numbers in the 75-80% accuracy range —
-if something's wildly off (e.g. near-random ~25%), something upstream
-broke; ask before assuming it's fine.
+Prints formal accuracy/macro-F1/per-class F1 for RF, U-Net, and the
+hybrid, scored against the 300-point validation CSV. On that set the last
+run (TF/Keras models retrained 2026-09-18) gave accuracy 65.6% / 70.3% /
+69.6% and macro-F1 0.61 / 0.55 / 0.65 for RF / U-Net / hybrid, with U-Net at
+zero recall on "bare". The older 75-80% accuracy figures came from the
+previous 200-point set — don't compare across the two. If something's wildly
+off (e.g. near-random ~25%), something upstream broke; ask before assuming
+it's fine.
 
 ### 2h. Check your work — XGBoost and CNN specifically
 
@@ -282,10 +274,11 @@ python scripts/diagnose_heat_model.py
 ```
 
 What to actually check in the output:
-- **XGBoost's full-table RMSE** (printed near the top) — should be in the
-  same ballpark as its own training run's held-out test RMSE (~1°C is
-  what we've seen; this script's number is informal/in-sample-mixed, not
-  the honest held-out figure, so don't over-read small differences).
+- **XGBoost's full-table RMSE** (printed near the top) — this script's
+  number is informal/in-sample-mixed, so it should come out *lower* than
+  the honest held-out test RMSE from the training run (last run: ~0.5°C
+  here vs. ~1.05°C held-out, R² ≈ 0.80). Don't over-read small differences,
+  and don't quote it as the model's accuracy.
 - **The 3 demo subzones' cooling-direction agreement** (TUAS NORTH, GUL
   CIRCLE, CHIN BEE) — each should print "✅ same direction as XGBoost".
   If any flip to "⚠️ OPPOSITE direction," that's a real disagreement worth
@@ -316,9 +309,12 @@ accuracy curves without re-reading printed epoch logs.
 
 ### Where the knobs are
 
-`config/settings.py`, under "RF / U-Net hyperparameters" — these are
-**shared** between U-Net and the CNN heat model (the CNN's training code
-imports the same `UNET_*` constants, doesn't have its own copies):
+`config/settings.py`, under "RF / U-Net hyperparameters" for U-Net. The CNN
+heat model has its **own, independent** `CNN_*` block further down, under
+"S5" (`CNN_BATCH_SIZE`, `CNN_EPOCHS`, `CNN_LEARNING_RATE`, `CNN_BASE_FILTERS`,
+`CNN_EARLY_STOP_PATIENCE`, `CNN_TRAIN_VAL_SPLIT`). They hold the same values
+today only by coincidence, so tuning one doesn't touch the other. The U-Net
+knobs:
 
 ```python
 UNET_PATCH_SIZE = 128           # don't change this one -- tied to how patches were exported
@@ -337,7 +333,7 @@ sees what's actually pushed), then run the training notebook as in Task 2.
 ### The one thing you need to know before tuning anything
 
 **Retraining with *identical* settings doesn't give identical results.**
-We measured this directly: 3 back-to-back U-Net retrains, same
+We measured this directly (PyTorch-era runs, old 200-point validation set): 3 back-to-back U-Net retrains, same
 hyperparameters, same data, came back at 79.3%, 77.8%, and 76.3%
 accuracy — a ~3-point spread from GPU non-determinism alone (weight init,
 exact early-stopping epoch). That means **a single before/after comparison
@@ -352,7 +348,9 @@ Don't just chase overall accuracy — we found RF is consistently the
 weakest on accuracy across every run, but **U-Net is consistently the
 weakest on macro-F1** (it does fine on the big classes, vegetation/
 built-up, but struggles on "bare," the smallest/most ambiguous class —
-its `bare_f1` swung between 0.13 and 0.21 across 3 runs). If you're
+its `bare_f1` swung between 0.13 and 0.21 across those 3 runs, and on the
+current 300-point set it is 0.000 — zero recall on "bare" — vs. 0.37 for RF
+and 0.42 for the hybrid). If you're
 tuning U-Net specifically, macro-F1 (or `bare_f1` directly, printed by
 `evaluate_landcover_classifiers.py`) is the more informative number to
 watch than accuracy alone.
@@ -388,25 +386,34 @@ streamlit run app/Home.py
 Six pages, in sidebar order:
 - **Home** — pipeline status checklist (what's built vs. not, on disk).
 - **Label Validation Points** — the labeling tool from Task 1.
-- **Island Map** — folium choropleth of the cooling-priority score,
-  click a subzone to select it.
-- **Subzone Breakdown** — per-subzone pillar detail, confidence bands,
-  land-cover fractions, for whichever subzone is selected.
+- **Island Map** — folium choropleth of the cooling-priority score (or of
+  its confidence-band width, or each subzone's chance of being in the top
+  20), click a subzone to select it.
+- **Subzone Breakdown** — per-subzone pillar detail, confidence band and
+  chance of being in the top 20, land-cover fractions, for whichever
+  subzone is selected.
 - **Counterfactual Greening** — "what if this area were greener?" — a
   live XGBoost subzone-level slider plus a live CNN patch-level slider
   (both call real trained models directly, no precomputed examples).
 - **Validation Dashboard** — every validated output already on disk in
-  one place (Week-1 gates, classifier evaluation, hotspot cluster
-  quality, S5/S6 diagnostics, LST cross-checks).
+  one place (Week-1 gates, classifier evaluation, PCA-vs-equal-weighting
+  and sensitivity-specification tables, hotspot cluster quality, S5/S6
+  diagnostics, LST cross-checks).
 
 Open-ended: poke around, fix/polish whatever looks rough. One concrete
 starting point if you want one — on the Counterfactual Greening page, try
-subzone **ALJUNIED**: XGBoost predicts *warming* (+0.42°C) for the same
-"+0.15 vegetation fraction" scenario where CNN predicts *cooling*
-(−2.344°C) — opposite signs, a real disagreement between the two models
-that hasn't been investigated yet. Worth a look either as a UI thing (is
-something displayed misleadingly?) or a modeling thing (why do they
-actually disagree here?) — genuinely don't know which yet.
+subzone **ALJUNIED**: for the same "+0.15 vegetation fraction" scenario,
+XGBoost and the CNN give *opposite signs* — a real disagreement between the
+two models that hasn't been investigated yet. The numbers have moved with
+each retrain and, notably, the roles flipped: on the earlier models XGBoost
+predicted *warming* (+0.42°C) and the CNN *cooling* (−2.34°C); on the
+2026-09-19 models XGBoost predicts −0.10°C (cooling) and the CNN +0.56°C
+(warming, edit at the subzone centroid, 50 m radius). One hypothesis, not
+tested: since the sign doesn't follow either model consistently, it may be
+something location-specific (what does the CNN see under that centroid?)
+rather than one model being systematically wrong. Worth a look either as a
+UI thing (is something displayed misleadingly?) or a modeling thing —
+genuinely don't know which yet.
 
 ---
 
@@ -423,16 +430,20 @@ late than a slow script.
 Known, real, currently-unresolved gaps to prime your thinking (not an
 exhaustive list, don't feel limited to these):
 
-- **The land-cover ensemble consistently underperforms the original
-  TensorFlow version by ~2-3.5 accuracy points**, reproducibly across 3
-  retrains — individual U-Net accuracy is fine, so it looks like a
-  probability-calibration difference specifically affecting the RF+U-Net
-  soft-vote average. Nobody's confirmed the actual cause yet.
+- **Historical, now unverified — an RF+U-Net calibration gap.** In the
+  PyTorch era the soft-voted land-cover combination (then called the
+  "ensemble") underperformed the original TensorFlow version by ~2-3.5
+  accuracy points across 3 retrains, which looked like a probability-
+  calibration effect on the soft-vote average. Both networks have since
+  been retrained under TensorFlow/Keras (2026-09-18) against the new
+  300-point set, so that comparison no longer applies; whether any gap
+  remains hasn't been measured (and accuracy numbers aren't comparable
+  across the 200- and 300-point validation sets).
 - **`validation/input_validation/labeling_agreement.py`** (the script
   behind the G5 labeling-agreement kappa number) has no persisted per-run
   output — the Validation Dashboard shows a static, hand-copied number
-  rather than something it actually recomputes live. With 300 fresh
-  points to work with (Task 1), this might be worth properly wiring up.
+  rather than something it actually recomputes live. With the 300 labeled
+  points now available (Task 1), this might be worth properly wiring up.
 - **`diagnose_heat_model.py` only ever checks 3 hardcoded subzones**
   (TUAS NORTH, GUL CIRCLE, CHIN BEE) for the XGBoost/CNN cross-check —
   ALJUNIED disagreeing was found by accident, not by systematic checking.
@@ -442,6 +453,17 @@ exhaustive list, don't feel limited to these):
   number gets reported without anyone checking whether it's stable
   across reruns, the way we found U-Net's accuracy swings ~3 points just
   from retraining with identical settings?
+- **The cooling-priority score (S6), as of 2026-09-19.** Worth knowing
+  before you evaluate it: the confidence bands come from measured validation
+  error (exposure: the offset-removed spread of Landsat LST vs MODIS;
+  greenery: the hybrid-vs-NDVI-proxy disagreement) and are validation-based,
+  not statistically calibrated — their coverage was never tested. The
+  sensitivity pillar's uncertainty is *formula choice*, not noise: using raw
+  population count instead of density changes 13 of the top 20 (see the
+  Validation Dashboard's specification table), more than measurement noise
+  does (~10). PCA weights come out close to equal weights (4 of the top 20
+  differ). And the classifier→ranking swap — does RF vs U-Net vs hybrid change
+  which subzones rank? — hasn't been built.
 
 Write up whatever you find/think — doesn't need to be fixed immediately,
 a clear-eyed list of "here's what I don't fully trust yet and why" is

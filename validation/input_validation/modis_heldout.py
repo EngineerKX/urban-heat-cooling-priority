@@ -24,7 +24,7 @@ def build_modis_heldout(
     modis_lst_composite, subzones_fc, id_property: str, heat_subzone_ids: pd.Series, scale: int,
 ) -> pd.DataFrame:
     """Returns [subzone_id, lst_heldout_c] -- same column name as
-    nea_heldout.py's output so both slot into rank_impact.rmse_vs_heldout
+    nea_heldout.py's output so both slot into rank_impact.heldout_agreement
     unmodified."""
     heldout_df = zonal_mean(modis_lst_composite, "lst_heldout_c", subzones_fc, id_property, scale)
 
@@ -34,7 +34,8 @@ def build_modis_heldout(
     # zonal_mean returns one row per requested subzone, NaN where no valid
     # pixel fell in-mask (tiny/sliver subzones) -- drop those so this table
     # matches nea_heldout.py's invariant of never containing a NaN target
-    # value (rmse_vs_heldout has no NaN handling of its own).
+    # value (rmse_vs_heldout has no NaN handling of its own; heldout_agreement
+    # drops NaNs itself, but the invariant keeps both tables interchangeable).
     heldout_df = heldout_df.dropna(subset=["lst_heldout_c"])
     n_dropped = n_before_dropna - len(heldout_df)
     print(f"MODIS held-out table: {len(heldout_df)} subzones with a valid value "

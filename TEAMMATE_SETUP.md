@@ -83,7 +83,7 @@ means no separate audit trail for your own usage.
 - `GEE_PROJECT_ID`, `GEE_EXPORT_BUCKET`, `GCS_MODEL_BUCKET` in `.env` —
   project-level values, not machine-specific.
 - `data/`, `models/`, `mlruns/`, `mlflow.db` — every cached GEE export and
-  **already-trained model** (U-Net, CNN, the RF/ensemble rasters) came
+  **already-trained model** (U-Net, CNN, the RF/hybrid rasters) came
   along in the copy. You do not need to retrain or re-run anything to get
   a working app — see step 6.
 - The git remote — already points at the shared GitHub repo, so `git

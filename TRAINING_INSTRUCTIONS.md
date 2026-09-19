@@ -1,33 +1,39 @@
 # Training instructions — full retrain + MLflow verification walkthrough
 
 Manual, step-by-step sequence to retrain every model in the pipeline
-(RF, K-means/GMM hotspot clustering, XGBoost, U-Net, CNN) end-to-end and
-see the results land in MLflow. Start the MLflow UI first so you can
-refresh it as you go:
+(RF, K-means/GMM hotspot clustering, XGBoost, U-Net, CNN) end-to-end, see
+the results land in MLflow, and refresh the cooling-priority score that sits
+downstream of the land-cover model (Step 11). Start the MLflow UI first so
+you can refresh it as you go:
 
 ```
 .venv\Scripts\python.exe -m mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
 Opens at `http://localhost:5000`. Three experiments will show up:
-`landcover_classifiers` (RF/U-Net/ensemble training + evaluation),
+`landcover_classifiers` (RF/U-Net/hybrid training + evaluation),
 `hotspot_clusters_s4` (K-means/GMM), `heat_model_s5` (XGBoost/CNN +
-diagnostics).
+diagnostics). A store that predates the ensemble→hybrid rename also holds
+older runs under the previous names (e.g. `evaluate_ensemble`) — that's
+history, not something you need to produce.
 
 Steps below are ordered by actual dependency, not by convenience — each
 step only waits on the steps it genuinely needs:
 
-- Ensemble (Step 3) needs RF (Step 1) + U-Net (Step 2).
-- Formal evaluation (Step 5) needs RF + U-Net + ensemble — nothing else,
-  so it runs right after the ensemble, not at the end.
+- Hybrid (Step 3) needs RF (Step 1) + U-Net (Step 2).
+- Formal evaluation (Step 5) needs RF + U-Net + hybrid — nothing else,
+  so it runs right after the hybrid, not at the end.
 - Hotspot clustering (Step 6)'s land-cover coherence check is *optional*
-  and only benefits from the ensemble existing (Step 3/4) — the
+  and only benefits from the hybrid existing (Step 3/4) — the
   clustering itself has no hard dependency on RF/U-Net at all.
 - XGBoost (Step 7) needs hotspot clustering's `primary_cluster` feature
   (Step 6).
-- CNN (Step 8) needs the ensemble raster pushed to GCS (Step 4).
+- CNN (Step 8) needs the hybrid raster pushed to GCS (Step 4).
 - The heat-model diagnostic (Step 10) needs XGBoost (Step 7) + CNN
   (Step 9).
+- The cooling-priority score (Step 11) needs only the hybrid (Step 3), so
+  it can run any time after it. It's easy to forget and it matters: none of
+  its scripts notice when the land-cover raster changes.
 
 ---
 
@@ -37,7 +43,7 @@ step only waits on the steps it genuinely needs:
 python scripts/train_landcover_rf.py --with-probabilities
 ```
 
-`--with-probabilities` is required (not just nice-to-have) — the ensemble
+`--with-probabilities` is required (not just nice-to-have) — the hybrid
 needs RF's per-class probability raster, and it forces a fresh classifier
 train regardless of the GEE asset cache (a cached classifier only
 supports hard-label output, not probabilities).
@@ -65,16 +71,16 @@ retrying an expensive lazy-graph evaluation, not a deterministic failure.
    reusing a Colab session from an earlier run.
 4. The last cell pushes the trained model + its MLflow run summary to GCS.
 
-## Step 3: Pull U-Net locally, run inference, rebuild the ensemble
+## Step 3: Pull U-Net locally, run inference, rebuild the hybrid
 
 ```
 python scripts/pull_models.py --model unet
 python scripts/run_landcover_unet_inference.py
-python scripts/build_landcover_ensemble.py --force
+python scripts/build_landcover_hybrid.py --force
 ```
 
-`--force` is required here — the ensemble script skips recompute if
-`ensemble_landcover.tif` already exists on disk, which it will if you've
+`--force` is required here — the hybrid script skips recompute if
+`hybrid_landcover.tif` already exists on disk, which it will if you've
 ever built it before, and that would silently leave it built from the
 *old* RF/U-Net rasters instead of the ones you just retrained.
 
@@ -83,10 +89,10 @@ ever built it before, and that would silently leave it built from the
 should see **10 params** and **5 metrics** — including `train_accuracy`
 and `best_val_loss`, not just the 3 metrics it used to log.
 
-## Step 4: Push the fresh ensemble raster (the CNN notebook needs it)
+## Step 4: Push the fresh hybrid raster (the CNN notebook needs it)
 
 ```
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, ENSEMBLE_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/ensemble_landcover.tif', GCS_MODEL_BUCKET, f'{ENSEMBLE_RASTER_GCS_PREFIX}.tif')"
+python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, HYBRID_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/hybrid_landcover.tif', GCS_MODEL_BUCKET, f'{HYBRID_RASTER_GCS_PREFIX}.tif')"
 ```
 
 ## Step 5: Run the formal land-cover evaluation
@@ -95,11 +101,11 @@ python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCK
 python scripts/evaluate_landcover_classifiers.py
 ```
 
-Runs now, right after the ensemble, since RF + U-Net + ensemble are all
+Runs now, right after the hybrid, since RF + U-Net + hybrid are all
 it needs — no reason to wait for hotspot clustering/XGBoost below.
 
 **Check MLflow**: 3 new runs — `evaluate_rf`, `evaluate_unet`,
-`evaluate_ensemble` (tag `stage=evaluation`) — each with `accuracy`,
+`evaluate_hybrid` (tag `stage=evaluation`) — each with `accuracy`,
 `macro_f1`, `weighted_f1`, `n_scored`, and per-class F1
 (`vegetation_f1`, `built_up_f1`, `bare_f1`, `water_f1`).
 
@@ -112,8 +118,17 @@ python scripts/build_hotspot_clusters.py --force
 `--force` for the same reason as Step 3 — `hotspot_clusters.csv` already
 existing on disk would otherwise skip the rebuild. This sweeps both
 K-means and GMM over k=2..8, keeps whichever wins on silhouette as
-`primary_cluster`, and (since the ensemble raster from Step 3 now exists)
+`primary_cluster`, and (since the hybrid raster from Step 3 now exists)
 runs the land-cover coherence sanity check against it.
+
+One thing to know: `--force` also re-fetches the seasonal LST/NDVI/NDBI
+features from Earth Engine, and those don't depend on the land-cover model
+at all, so it's slow (and can hit GEE timeouts) for no benefit. To rebuild
+only what changed, delete `data/processed/hotspot_clusters.csv` and
+`data/processed/hotspot_cluster_profile.csv` and run the script *without*
+`--force` — it reuses the cached feature table
+(`data/interim/hotspot_features_subzone.csv`) and just recomputes the
+clusters and their land-cover columns.
 
 **Check MLflow now**: new `hotspot_clusters_s4` experiment, three runs —
 `kmeans` and `gmm` (each with the full k-sweep logged as a metric curve,
@@ -161,3 +176,41 @@ python scripts/diagnose_heat_model.py
 (`n_subzones_checked`, `n_agreements`, `agreement_rate`, plus a
 per-subzone `xgb_delta_lst_*`/`cnn_delta_lst_*` pair for each of the 3
 demo subzones).
+
+This also rewrites `data/processed/heat_model/canned_counterfactual_examples.json`
+(the reference examples for the Counterfactual Greening page), so rerun it
+after retraining XGBoost or the CNN — otherwise one half of those examples
+comes from the old model.
+
+## Step 11: Refresh the cooling-priority score (S6)
+
+The score is built from the hybrid land-cover raster, and none of its
+scripts notice when that raster changes — each one only checks whether its
+*own output file* already exists. Skip this step and the map, breakdown and
+dashboard keep showing results from the previous land-cover model. (This has
+happened: outputs sat weeks behind a rebuilt raster.)
+
+```
+python scripts/build_adaptive_capacity_pillar.py --force
+python scripts/build_priority_score.py
+python scripts/build_priority_score_confidence_bands.py --force
+```
+
+In that order: the pillar reads the hybrid raster; `build_priority_score.py`
+has no cache and always recomputes (it also rewrites the PCA-vs-equal
+weighting and sensitivity-specification tables); the bands are a bootstrap
+over the finished score. Back up `data/processed/` first if you want to
+compare old and new rankings — how much the top 20 moved after a retrain is
+itself a useful result.
+
+One-time prerequisites (skip if the files already exist):
+- `data/interim/sensitivity_pillar.csv` — `python scripts/build_sensitivity_pillar.py`
+  (no Earth Engine call; uses the cached subzone polygons).
+- `data/interim/modis_heldout_lst.csv` — `python scripts/build_modis_heldout.py`
+  (uses Earth Engine). The bands script reads it for its exposure-noise
+  level and stops with a clear message if it's missing.
+
+These scripts don't log to MLflow. **Check the Validation Dashboard
+instead**: the "S6 — confidence bands" section and the rank-impact section
+(PCA-vs-equal weighting, sensitivity specification) should show freshly
+computed numbers.

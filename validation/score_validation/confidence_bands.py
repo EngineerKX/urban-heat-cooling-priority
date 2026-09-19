@@ -61,6 +61,7 @@ from config.settings import (
     PRIORITY_SCORE_BAND_QUANTILES, PRIORITY_SCORE_BOOTSTRAP_ITERATIONS, RANDOM_SEED, TOP_N,
 )
 from src.priority_score.score import build_score
+from validation.score_validation.rank_impact import heldout_agreement
 
 
 def exposure_noise_std(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFrame) -> float:
@@ -76,19 +77,12 @@ def exposure_noise_std(df: pd.DataFrame, exposure_col: str, heldout: pd.DataFram
     can't move a rank, and at 11.6C swamped the ~2.5C real spread between
     subzones.
     """
-    if heldout is None:
+    agreement = heldout_agreement(df, exposure_col, heldout)
+    if np.isnan(agreement["spread_c"]):
         return np.nan
-    merged = df[["subzone_id", exposure_col]].merge(
-        heldout[["subzone_id", "lst_heldout_c"]], on="subzone_id", how="inner",
-    ).dropna()
-    if len(merged) < 3:
-        return np.nan
-
-    residual = merged[exposure_col] - merged["lst_heldout_c"]
-    std = float(residual.std(ddof=1))
-    print(f"Exposure noise model: {len(merged)} subzones, mean offset {residual.mean():+.2f}C (removed), "
-          f"offset-removed std {std:.2f}C")
-    return std
+    print(f"Exposure noise model: {agreement['n']} subzones, mean offset {agreement['mean_offset_c']:+.2f}C (removed), "
+          f"offset-removed std {agreement['spread_c']:.2f}C")
+    return agreement["spread_c"]
 
 
 def adaptive_capacity_noise_std(df: pd.DataFrame, greenery_col: str, reference_col: str) -> float:

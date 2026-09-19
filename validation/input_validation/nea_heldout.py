@@ -9,9 +9,11 @@ several degrees higher than air temp over built-up surfaces, especially near
 satellite overpass time. This is the best independent, zero-cost validation
 source available in scope — but it's a proxy with a systematic offset baked
 in, not clean ground truth. State that plainly as a limitation; don't
-present RMSE against this as validated-against-true-LST. Spearman / top-N
-overlap (see validation/score_validation/rank_impact.py) are less sensitive
-to this since they're rank-based, not magnitude-based.
+present RMSE against this as validated-against-true-LST. Use
+validation/score_validation/rank_impact.py::heldout_agreement instead: it
+reports the systematic offset, the offset-removed spread and Spearman
+separately, and only the last two can move a rank (RMSE mostly restates the
+offset).
 
 Coverage is inherently sparse: Singapore has on the order of a few dozen
 weather stations against ~330 subzones, so most subzones have no matched

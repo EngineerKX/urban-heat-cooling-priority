@@ -15,12 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from scipy.stats import spearmanr
 
 from config.settings import (
     CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS,
 )
-from validation.score_validation.rank_impact import rmse_vs_heldout
+from validation.score_validation.rank_impact import heldout_agreement
 
 st.set_page_config(page_title="Validation Dashboard — Urban Heat & Cooling Priority", page_icon="✅", layout="wide")
 st.title("✅ Validation dashboard")
@@ -66,6 +65,14 @@ with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", exp
             st.dataframe(pd.read_csv(path), use_container_width=True, hide_index=True)
         else:
             st.caption(f"`{path}` not found — run `python scripts/build_priority_score.py` first.")
+
+    st.caption(
+        f"Each heat layer is compared with the {EXPOSURE_NOISE_SOURCE.upper()} held-out LST table. Offset = "
+        f"mean(Landsat − held-out): a systematic gap that can't move any rank. Spread = the std of the residuals "
+        f"once that offset is removed. Spearman = rank agreement. RMSE is deliberately not shown — it mostly "
+        f"restates the offset. The three layers barely differ because the downscaling (approximately) preserves "
+        f"the 30 m mean, so their subzone means are almost identical."
+    )
 
     weighting_path = PROCESSED_DIR / "weighting_comparison.csv"
     membership_path = PROCESSED_DIR / f"weighting_comparison_top{TOP_N}_membership.csv"
@@ -158,22 +165,25 @@ with st.expander("Secondary LST cross-checks (NEA air-temp + MODIS)", expanded=F
     if heat_path.exists() and (nea_path.exists() or modis_path.exists()):
         heat_df = pd.read_csv(heat_path)
         rows = []
-        for variant in VARIANT_COLUMNS:
-            row = {"variant": variant}
-            if nea_path.exists():
-                nea_df = pd.read_csv(nea_path)
-                row["nea_rmse"] = rmse_vs_heldout(heat_df, variant, nea_df)
-            if modis_path.exists():
-                modis_df = pd.read_csv(modis_path)
-                row["modis_rmse"] = rmse_vs_heldout(heat_df, variant, modis_df)
-                merged = heat_df[["subzone_id", variant]].merge(modis_df, on="subzone_id", how="inner")
-                row["modis_spearman"] = spearmanr(merged[variant], merged["lst_heldout_c"])[0] if len(merged) > 1 else float("nan")
-            rows.append(row)
+        for source_label, source_path in (("NEA (air temperature)", nea_path), ("MODIS (1 km LST)", modis_path)):
+            if not source_path.exists():
+                continue
+            heldout_df = pd.read_csv(source_path)
+            for variant in VARIANT_COLUMNS:
+                agreement = heldout_agreement(heat_df, variant, heldout_df)
+                rows.append({
+                    "source": source_label, "variant": variant, "n": agreement["n"],
+                    "mean_offset_c": agreement["mean_offset_c"], "spread_c": agreement["spread_c"],
+                    "spearman": agreement["spearman"],
+                })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         st.caption(
-            "NEA measures air temperature (systematic offset vs. LST); MODIS measures true LST but at 1km "
-            "resolution (coarse vs. subzone scale) — different failure modes, which is why both are shown. "
-            "Prefer Spearman over RMSE for MODIS; see validation/input_validation/{nea_heldout,modis_heldout}.py."
+            "Landsat LST reads hotter than both references (see mean_offset_c): NEA measures air temperature and "
+            "MODIS a coarse 1 km surface temperature. That offset is systematic and can't move any rank, so RMSE "
+            "— which mostly restates it — is not shown. What matters for a ranking tool is spread_c (the residual "
+            "std once the offset is removed) and spearman. MODIS covers ~329 subzones, NEA only ~12, and the two "
+            "fail in different ways (footprint mismatch vs. air-temperature-vs-LST), which is why both are shown. "
+            "See validation/input_validation/{nea_heldout,modis_heldout}.py."
         )
     else:
         st.caption("Run `python scripts/build_nea_heldout.py` and/or `python scripts/build_modis_heldout.py` first.")
