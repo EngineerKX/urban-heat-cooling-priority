@@ -35,6 +35,23 @@ def load_or_fetch(
     return result
 
 
+def is_stale(output: Path, inputs) -> bool:
+    """True if `output` is missing or older than any input that exists.
+
+    The plain "skip if the output file exists" check used by most build
+    scripts can't notice that an upstream file was rebuilt, so they keep
+    serving results computed from the old input (this left the priority score
+    weeks behind a rebuilt land-cover raster). A modified-time check catches
+    exactly that case; scripts that adopt it recompute on their own when an
+    input is newer, and still take `--force` to override.
+    """
+    output = Path(output)
+    if not output.exists():
+        return True
+    output_mtime = output.stat().st_mtime
+    return any(Path(p).exists() and Path(p).stat().st_mtime > output_mtime for p in inputs)
+
+
 def load_or_fetch_json(path: Path, fetch_fn: Callable[[], dict], force: bool = False) -> dict:
     def _load(p: Path) -> dict:
         with open(p, encoding="utf-8") as f:

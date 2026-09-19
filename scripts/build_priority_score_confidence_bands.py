@@ -29,6 +29,7 @@ from validation.score_validation.confidence_bands import (
     bootstrap_priority_score,
     exposure_noise_std,
 )
+from validation.score_validation.decision_impact import noise_floor
 
 OUT_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
@@ -75,6 +76,8 @@ def main(force: bool = False):
           f"{int((top[p_col] >= 0.9).sum())} have {p_col} >= 0.9, "
           f"{int(((top[p_col] >= 0.5) & (top[p_col] < 0.9)).sum())} are 0.5-0.9, "
           f"{int((top[p_col] < 0.5).sum())} are < 0.5.")
+    print(f"Expected number of the top-{TOP_N} replaced by measurement noise alone: {noise_floor(result, TOP_N):.1f} — "
+          f"the yardstick for how many subzones a methodological choice has to move before it matters.")
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(OUT_PATH, index=False)

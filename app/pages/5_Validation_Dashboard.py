@@ -19,6 +19,7 @@ import streamlit as st
 from config.settings import (
     CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS,
 )
+from validation.score_validation.decision_impact import build_decision_impact_summary, noise_floor
 from validation.score_validation.rank_impact import heldout_agreement
 
 st.set_page_config(page_title="Validation Dashboard — Urban Heat & Cooling Priority", page_icon="✅", layout="wide")
@@ -55,6 +56,37 @@ with st.expander("Land-cover classifiers: RF vs. U-Net vs. hybrid", expanded=Tru
             st.dataframe(confusion_df, use_container_width=True, hide_index=True)
     else:
         st.caption(f"`{comparison_path}` not found — run `python scripts/evaluate_landcover_classifiers.py` first.")
+
+# --- Decision impact vs. measurement noise (contribution 3) -----------------------
+with st.expander("Decision impact — which choices move the top-20 more than measurement noise does?", expanded=True):
+    decision_inputs = {
+        "weighting_df": PROCESSED_DIR / "weighting_comparison.csv",
+        "rank_impact_df": PROCESSED_DIR / "rank_impact_results_pca.csv",
+        "spec_df": PROCESSED_DIR / "sensitivity_spec_comparison.csv",
+        "swap_df": PROCESSED_DIR / "landcover_swap_comparison.csv",
+        "bands_df": PROCESSED_DIR / "priority_score_confidence_bands.csv",
+    }
+    missing_inputs = [p.name for p in decision_inputs.values() if not p.exists()]
+    if missing_inputs:
+        st.caption(
+            f"Not all inputs exist yet ({', '.join(missing_inputs)}) — run `python scripts/build_priority_score.py`, "
+            "`python scripts/build_landcover_swap_comparison.py` and "
+            "`python scripts/build_priority_score_confidence_bands.py` first."
+        )
+    else:
+        summary_df = build_decision_impact_summary(
+            **{name: pd.read_csv(csv_path) for name, csv_path in decision_inputs.items()}, top_n=TOP_N,
+        )
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.caption(
+            f"Each row changes ONE methodological choice, holds everything else fixed, and counts how many of the "
+            f"top-{TOP_N} subzones move (the range across the alternatives tested). The first row is the yardstick: "
+            f"the expected number of the top {TOP_N} that measurement uncertainty in exposure and greenery would "
+            f"replace on its own (bootstrap). A choice that moves fewer subzones than that is indistinguishable from "
+            f"data noise for planning purposes; one that moves more is a real decision to justify. Both sides count "
+            f"subzones entering or leaving the top {TOP_N}, but the noise figure is an average over draws and covers "
+            f"measurement noise only — formula choices (weighting, sensitivity) are what the other rows measure."
+        )
 
 # --- Rank-impact / heat-variant ablation -------------------------------------
 with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", expanded=False):
@@ -101,6 +133,20 @@ with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", exp
         )
     else:
         st.caption(f"`{spec_path}` not found — run `python scripts/build_priority_score.py` first.")
+
+    swap_path = PROCESSED_DIR / "landcover_swap_comparison.csv"
+    if swap_path.exists():
+        st.markdown("**Land-cover classifier swap (does the classifier change the priorities?)**")
+        st.dataframe(pd.read_csv(swap_path), use_container_width=True, hide_index=True)
+        st.caption(
+            "The greenery fraction feeding the adaptive-capacity pillar is taken from each classifier's raster in "
+            "turn (exposure, sensitivity and PCA weighting held fixed) and compared with the production hybrid. Only "
+            "the vegetation share reaches the score, so e.g. U-Net's zero recall on bare land matters only through "
+            "vegetation. A constant misclassification rate changes nothing (an affine distortion that the "
+            "normalisation cancels); only errors that vary between subzones can move a rank."
+        )
+    else:
+        st.caption(f"`{swap_path}` not found — run `python scripts/build_landcover_swap_comparison.py` first.")
 
     heat_variant_plot = DIAGNOSTICS_DIR / "heat_variant_diagnostic.png"
     if heat_variant_plot.exists():
@@ -203,9 +249,10 @@ with st.expander("S6 — confidence bands", expanded=False):
         st.metric("Overlapping adjacent pairs in top 20", f"{overlaps} / {len(top20) - 1}")
         p_col = f"p_top{TOP_N}"
         if p_col in bands_df.columns:
-            robust_col, borderline_col = st.columns(2)
+            robust_col, borderline_col, noise_col = st.columns(3)
             robust_col.metric(f"Top-{TOP_N}: ≥90% chance of staying", int((top20[p_col] >= 0.9).sum()))
             borderline_col.metric(f"Top-{TOP_N}: <50% chance of staying", int((top20[p_col] < 0.5).sum()))
+            noise_col.metric(f"Top-{TOP_N} replaced by noise alone (expected)", f"{noise_floor(bands_df, TOP_N):.1f}")
         st.dataframe(top20, use_container_width=True, hide_index=True)
         st.caption(
             f"Bootstrapped from the offset-removed spread of Landsat LST vs the {EXPOSURE_NOISE_SOURCE.upper()} "
