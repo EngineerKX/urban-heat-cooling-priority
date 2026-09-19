@@ -16,7 +16,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from config.settings import PROCESSED_DIR, REFERENCE_VARIANT
+from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join
 from src.priority_score.score import build_score
 from src.utils.geo import normalize
@@ -65,6 +65,13 @@ if BANDS_PATH.exists():
     if not band_row.empty:
         b = band_row.iloc[0]
         st.subheader("Confidence band")
+        p_col = f"p_top{TOP_N}"
+        if p_col in b.index:
+            st.metric(
+                f"Chance of being in the top {TOP_N}", f"{b[p_col]:.0%}",
+                help=f"Share of bootstrap draws in which this subzone lands among the {TOP_N} highest-priority "
+                     f"subzones. A rank alone can't tell you how reliable it is; this can.",
+            )
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=[b["priority_score_p50"]], y=["Priority score"], mode="markers",

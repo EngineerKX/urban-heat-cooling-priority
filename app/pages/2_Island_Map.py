@@ -19,7 +19,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from config.settings import PROCESSED_DIR, SG_CENTER, SUBZONE_ID_PROPERTY
+from config.settings import PROCESSED_DIR, SG_CENTER, SUBZONE_ID_PROPERTY, TOP_N
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 
 st.set_page_config(page_title="Island Map — Urban Heat & Cooling Priority", page_icon="🗺️", layout="wide")
@@ -27,6 +27,7 @@ st.title("🗺️ Island-wide cooling-priority map")
 
 PRIORITY_SCORE_PATH = PROCESSED_DIR / "priority_score.csv"
 BANDS_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
+P_TOP_COL = f"p_top{TOP_N}"
 
 if not PRIORITY_SCORE_PATH.exists():
     st.warning(f"`{PRIORITY_SCORE_PATH}` not found — run `python scripts/build_priority_score.py` first.")
@@ -42,15 +43,21 @@ def load_map_data():
     if BANDS_PATH.exists():
         bands_df = pd.read_csv(BANDS_PATH)
         merged = merged.merge(bands_df, on="subzone_id", how="left")
+        if P_TOP_COL in merged.columns:
+            merged[P_TOP_COL] = merged[P_TOP_COL].round(2)
     return merged
 
 
 gdf = load_map_data()
 has_bands = "band_width" in gdf.columns
 
-options = ["Priority score"] + (["Confidence-band width"] if has_bands else [])
-color_by = st.radio("Color by", options, horizontal=True)
-value_col = "priority_score" if color_by == "Priority score" else "band_width"
+color_options = {"Priority score": "priority_score"}
+if has_bands:
+    color_options["Confidence-band width"] = "band_width"
+if P_TOP_COL in gdf.columns:
+    color_options[f"Chance of top-{TOP_N}"] = P_TOP_COL
+color_by = st.radio("Color by", list(color_options), horizontal=True)
+value_col = color_options[color_by]
 
 plot_gdf = gdf[gdf[value_col].notna()].copy()
 n_missing = len(gdf) - len(plot_gdf)
@@ -66,6 +73,9 @@ tooltip_aliases = ["Subzone", "Priority score"]
 if has_bands:
     tooltip_fields.append("band_width")
     tooltip_aliases.append("Band width (p95-p05)")
+if P_TOP_COL in gdf.columns:
+    tooltip_fields.append(P_TOP_COL)
+    tooltip_aliases.append(f"Chance of top-{TOP_N}")
 
 
 def _style(feature):

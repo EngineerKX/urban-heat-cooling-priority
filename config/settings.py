@@ -197,10 +197,20 @@ ADAPTIVE_CAPACITY_SOURCE = "landcover"
 RANDOM_SEED = 42
 
 # ---------------------------------------------------------------------------
-# S6 — calibrated confidence bands (bootstrap over validation error)
+# S6 — confidence bands (bootstrap over validation error)
 # ---------------------------------------------------------------------------
 PRIORITY_SCORE_BOOTSTRAP_ITERATIONS = 1000
 PRIORITY_SCORE_BAND_QUANTILES = (0.05, 0.50, 0.95)
+
+# Which held-out LST source sets the exposure noise level in the bootstrap:
+# "modis" (MOD11A2 -- same physical quantity as Landsat LST, ~329 subzones)
+# or "nea" (weather-station AIR temperature, only ~12 subzones). Either way
+# the noise is the std of (Landsat - held-out) residuals AFTER removing their
+# mean offset: a constant offset can't move any rank, so only the spread
+# around it is noise. Still an upper bound on random error, because it also
+# contains the mismatch between the held-out footprint (MODIS is 1km) and a
+# subzone. See validation/score_validation/confidence_bands.py.
+EXPOSURE_NOISE_SOURCE = "modis"
 
 # ---------------------------------------------------------------------------
 # Rank-impact / ablation

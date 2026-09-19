@@ -17,7 +17,9 @@ import plotly.express as px
 import streamlit as st
 from scipy.stats import spearmanr
 
-from config.settings import CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS
+from config.settings import (
+    CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS,
+)
 from validation.score_validation.rank_impact import rmse_vs_heldout
 
 st.set_page_config(page_title="Validation Dashboard — Urban Heat & Cooling Priority", page_icon="✅", layout="wide")
@@ -165,7 +167,7 @@ with st.expander("Secondary LST cross-checks (NEA air-temp + MODIS)", expanded=F
         st.caption("Run `python scripts/build_nea_heldout.py` and/or `python scripts/build_modis_heldout.py` first.")
 
 # --- S6 confidence bands -------------------------------------------------------
-with st.expander("S6 — calibrated confidence bands", expanded=False):
+with st.expander("S6 — confidence bands", expanded=False):
     bands_path = PROCESSED_DIR / "priority_score_confidence_bands.csv"
     if bands_path.exists():
         bands_df = pd.read_csv(bands_path)
@@ -177,12 +179,20 @@ with st.expander("S6 — calibrated confidence bands", expanded=False):
         )
         st.metric("Mean band width (p95−p05)", f"{bands_df['band_width'].mean():.3f}")
         st.metric("Overlapping adjacent pairs in top 20", f"{overlaps} / {len(top20) - 1}")
+        p_col = f"p_top{TOP_N}"
+        if p_col in bands_df.columns:
+            robust_col, borderline_col = st.columns(2)
+            robust_col.metric(f"Top-{TOP_N}: ≥90% chance of staying", int((top20[p_col] >= 0.9).sum()))
+            borderline_col.metric(f"Top-{TOP_N}: <50% chance of staying", int((top20[p_col] < 0.5).sum()))
         st.dataframe(top20, use_container_width=True, hide_index=True)
         st.caption(
-            "Bootstrapped from NEA-heldout RMSE (exposure) + land-cover hybrid recall SE (adaptive capacity) "
-            "— NOT the sensitivity pillar (no validation-error estimate exists for it). The exposure RMSE also "
-            "mixes real noise with the systematic LST-vs-air-temperature offset, so read these as a pessimistic "
-            "upper bound on rank uncertainty. See validation/score_validation/confidence_bands.py's docstring."
+            f"Bootstrapped from the offset-removed spread of Landsat LST vs the {EXPOSURE_NOISE_SOURCE.upper()} "
+            f"held-out source (exposure) + land-cover hybrid vegetation-recall SE (adaptive capacity) — NOT the "
+            f"sensitivity pillar (no validation-error estimate exists for it). Exposure noise is an upper bound (it "
+            f"also contains the held-out footprint's mismatch with the subzone) and the adaptive-capacity noise "
+            f"ignores the hybrid's built-up→vegetation error, so read the bands as rough, not tight. `{p_col}` is "
+            f"the share of bootstrap draws in which a subzone lands in the top {TOP_N}. These are validation-based "
+            f"bands, not statistically calibrated ones. See validation/score_validation/confidence_bands.py's docstring."
         )
     else:
         st.caption(f"`{bands_path}` not found — run `python scripts/build_priority_score_confidence_bands.py` first.")

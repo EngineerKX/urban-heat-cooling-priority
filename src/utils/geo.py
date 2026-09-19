@@ -8,11 +8,20 @@ import ee
 import pandas as pd
 
 
-def normalize(s: pd.Series) -> pd.Series:
-    """Min-max normalize. Returns all-zero if the series is constant."""
-    if s.max() == s.min():
+def normalize(s: pd.Series, ref: pd.Series = None) -> pd.Series:
+    """Min-max normalize. Returns all-zero if the series is constant.
+
+    `ref`, if given, supplies the min/max instead of `s` itself, so `s` is
+    scaled against a FIXED reference range. The S6 confidence-band bootstrap
+    needs this: re-normalizing every noisy draw against its own range lets
+    the noise stretch that range, which squashes hot subzones' scores and
+    shifts the whole band away from the point estimate (see
+    validation/score_validation/confidence_bands.py).
+    """
+    lo, hi = (s.min(), s.max()) if ref is None else (ref.min(), ref.max())
+    if hi == lo:
         return s * 0
-    return (s - s.min()) / (s.max() - s.min())
+    return (s - lo) / (hi - lo)
 
 
 def sanitize_dotted_properties(geojson: dict) -> dict:

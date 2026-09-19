@@ -12,7 +12,7 @@ from src.utils.geo import normalize
 
 def build_score(
     df: pd.DataFrame, exposure_col: str, weighting: str, seed: int = RANDOM_SEED,
-    adaptive_capacity_col: str = "greenery_fraction",
+    adaptive_capacity_col: str = "greenery_fraction", reference_df: pd.DataFrame = None,
 ):
     """Build the cooling-priority score for one exposure (heat-layer) column.
     Sensitivity and adaptive-capacity deficit are held fixed — only the
@@ -26,6 +26,12 @@ def build_score(
     sources (see config.settings.ADAPTIVE_CAPACITY_SOURCE) without
     duplicating this function.
 
+    `reference_df` (default None = normalize `df` against its own range, as
+    everywhere else) pins each pillar's min-max scaling to another table's
+    range. Only the confidence-band bootstrap uses it, passing the
+    unperturbed data so noisy draws are scored on the same scale as the
+    point estimate.
+
     `weighting="pca"` fits a fresh 1-component PCA on every call — the sign
     of the fitted loadings is aligned to the exposure loading only, so a
     pillar whose loading disagrees with exposure can come out negative,
@@ -34,9 +40,10 @@ def build_score(
     this function resolves silently — inspect the returned `weights` dict;
     a negative entry means this happened.
     """
-    exposure_norm = normalize(df[exposure_col])
-    sensitivity_norm = normalize(df["sensitivity_raw"])
-    adaptive_deficit_norm = normalize(1 - df[adaptive_capacity_col])
+    ref = df if reference_df is None else reference_df
+    exposure_norm = normalize(df[exposure_col], ref[exposure_col])
+    sensitivity_norm = normalize(df["sensitivity_raw"], ref["sensitivity_raw"])
+    adaptive_deficit_norm = normalize(1 - df[adaptive_capacity_col], 1 - ref[adaptive_capacity_col])
 
     pillars = pd.DataFrame({
         "exposure": exposure_norm,
