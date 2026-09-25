@@ -8,7 +8,9 @@ doesn't duplicate this join logic.
 import numpy as np
 import pandas as pd
 
-from config.settings import EXPOSURE_NOISE_SOURCE, INTERIM_DIR, RANDOM_SEED, VARIANT_COLUMNS
+from config.settings import (
+    EXPOSURE_NOISE_SOURCE, INTERIM_DIR, MIN_RESIDENTS_FOR_RANKING, RANDOM_SEED, VARIANT_COLUMNS,
+)
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
 SENSITIVITY_CSV_PATH = INTERIM_DIR / "sensitivity_pillar.csv"
@@ -74,6 +76,20 @@ def load_and_join(toy_mode: bool = False):
     print(f"Join summary: {len(heat)} -> {len(df)} subzones retained after pillar join.")
     if n_dropped:
         print(f"⚠️  {n_dropped} subzones dropped — check subzone_id spelling/casing across files.")
+
+    # Subzones under config.settings.MIN_RESIDENTS_FOR_RANKING carry a NaN
+    # sensitivity (see pillars.compute_sensitivity_raw). Leaving them out HERE means
+    # the score, bands, rank-impact and swap tables all rank the same subzones.
+    unranked = df["sensitivity_raw"].isna()
+    if "population_total" in df.columns and (df["population_total"].lt(MIN_RESIDENTS_FOR_RANKING) & ~unranked).any():
+        raise ValueError(
+            f"{SENSITIVITY_CSV_PATH} has subzones under {MIN_RESIDENTS_FOR_RANKING} residents with a sensitivity value — "
+            f"it predates MIN_RESIDENTS_FOR_RANKING. Rebuild it: python scripts/build_sensitivity_pillar.py --force"
+        )
+    if unranked.any():
+        df = df[~unranked].reset_index(drop=True)
+        print(f"Not ranked: {int(unranked.sum())} subzones have fewer than {MIN_RESIDENTS_FOR_RANKING} residents "
+              f"(no usable sensitivity). Ranking {len(df)} subzones.")
 
     heldout = load_heldout()
 

@@ -8,7 +8,8 @@ them without checking with whoever owns S6 — see
 `config.settings.NDVI_VEGETATION_THRESHOLD` and
 `SENSITIVITY_POPULATION_WEIGHT` / `SENSITIVITY_ELDERLY_WEIGHT`. (One exception,
 decided 2026-09-19: the sensitivity pillar's population term is now residents
-per km², not a raw count — see `SENSITIVITY_POPULATION_MEASURE`.)
+per km², not a raw count — see `SENSITIVITY_POPULATION_MEASURE`; and, decided
+2026-09-25, subzones under `MIN_RESIDENTS_FOR_RANKING` residents are not ranked.)
 """
 
 import ee
@@ -18,6 +19,7 @@ import pandas as pd
 
 from config.settings import (
     ELDERLY_AGE_COLUMNS,
+    MIN_RESIDENTS_FOR_RANKING,
     NDVI_VEGETATION_THRESHOLD,
     S2_UTM_CRS,
     SENSITIVITY_ELDERLY_WEIGHT,
@@ -65,13 +67,18 @@ def subzone_areas_km2(subzones_gdf: gpd.GeoDataFrame, id_property: str = SUBZONE
 
 def compute_sensitivity_raw(
     population_total: pd.Series, elderly_proportion: pd.Series, area_km2: pd.Series,
-    measure: str = SENSITIVITY_POPULATION_MEASURE,
+    measure: str = SENSITIVITY_POPULATION_MEASURE, min_residents: int = MIN_RESIDENTS_FOR_RANKING,
 ) -> pd.Series:
     """0.5 * normalize(population term) + 0.5 * normalize(elderly_proportion),
     where the population term is residents per km² ("density") or the raw
     resident count ("count"). Zero/missing area gives density 0, not inf.
     The 50/50 split is still a PLACEHOLDER; count-vs-density was decided
     2026-09-19 — see config.settings.SENSITIVITY_POPULATION_MEASURE.
+
+    Subzones with fewer than `min_residents` residents get NaN (not rankable, see
+    config.settings.MIN_RESIDENTS_FOR_RANKING) and are left out of both terms'
+    min-max range, so one tiny subzone with an extreme elderly share can't
+    stretch the scale the other subzones are measured on.
     """
     if measure == "density":
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -80,10 +87,15 @@ def compute_sensitivity_raw(
         population_term = population_total
     else:
         raise ValueError(f"Unknown SENSITIVITY_POPULATION_MEASURE '{measure}', expected 'density' or 'count'.")
-    return (
-        SENSITIVITY_POPULATION_WEIGHT * normalize(population_term)
-        + SENSITIVITY_ELDERLY_WEIGHT * normalize(elderly_proportion)
-    )
+
+    rankable = population_total >= min_residents  # NaN population -> False
+    if not rankable.any():
+        raise ValueError(f"No subzone has at least {min_residents} residents; nothing can be ranked.")
+
+    def _scale(term: pd.Series) -> pd.Series:
+        return normalize(term, term[rankable]).where(rankable)
+
+    return SENSITIVITY_POPULATION_WEIGHT * _scale(population_term) + SENSITIVITY_ELDERLY_WEIGHT * _scale(elderly_proportion)
 
 
 def build_sensitivity_pillar(heat_subzone_ids: pd.Series, area_km2_by_subzone: pd.Series) -> pd.DataFrame:
@@ -91,8 +103,10 @@ def build_sensitivity_pillar(heat_subzone_ids: pd.Series, area_km2_by_subzone: p
     population_density_km2, sensitivity_raw].
 
     `sensitivity_raw` follows `compute_sensitivity_raw` (population density by
-    default). Both the count and the density inputs are kept as columns so the
-    alternative specification can be compared without rebuilding
+    default), and is NaN for subzones under MIN_RESIDENTS_FOR_RANKING -- those
+    rows stay in the CSV but `load_and_join` leaves them out of the score. Both
+    the count and the density inputs are kept as columns so the alternative
+    specification can be compared without rebuilding
     (validation/score_validation/sensitivity_specs.py). The 50/50 population/
     elderly split remains a placeholder — see the module docstring.
     """
@@ -134,6 +148,9 @@ def build_sensitivity_pillar(heat_subzone_ids: pd.Series, area_km2_by_subzone: p
     matched["sensitivity_raw"] = compute_sensitivity_raw(
         matched["population_total"], matched["elderly_proportion_filled"], matched["area_km2"],
     )
+    n_unranked = int(matched["sensitivity_raw"].isna().sum())
+    print(f"{n_unranked} of {len(matched)} subzones have fewer than {MIN_RESIDENTS_FOR_RANKING} residents: "
+          f"sensitivity_raw left NaN, so they will not be ranked.")
     return matched[[
         "subzone_id", "population_total", "elderly_proportion", "area_km2", "population_density_km2", "sensitivity_raw",
     ]]

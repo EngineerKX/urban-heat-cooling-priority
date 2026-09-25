@@ -19,7 +19,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from config.settings import PROCESSED_DIR, SG_CENTER, SUBZONE_ID_PROPERTY, TOP_N
+from config.settings import MIN_RESIDENTS_FOR_RANKING, PROCESSED_DIR, SG_CENTER, SUBZONE_ID_PROPERTY, TOP_N
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 
 st.set_page_config(page_title="Island Map — Urban Heat & Cooling Priority", page_icon="🗺️", layout="wide")
@@ -62,7 +62,11 @@ value_col = color_options[color_by]
 plot_gdf = gdf[gdf[value_col].notna()].copy()
 n_missing = len(gdf) - len(plot_gdf)
 if n_missing:
-    st.caption(f"{n_missing} subzone(s) have no value for '{color_by}' and are shown uncolored.")
+    st.caption(
+        f"{n_missing} subzone(s) are not drawn: they have no value for '{color_by}'. Subzones with fewer than "
+        f"{MIN_RESIDENTS_FOR_RANKING} residents (parks, reserves, industrial estates) are not ranked, because a "
+        f"resident-based sensitivity can't be estimated for them."
+    )
 
 vmin, vmax = float(plot_gdf[value_col].min()), float(plot_gdf[value_col].max())
 colormap = cm.linear.YlOrRd_09.scale(vmin, vmax)

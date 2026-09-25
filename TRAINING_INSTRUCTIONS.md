@@ -26,8 +26,9 @@ step only waits on the steps it genuinely needs:
 - Hotspot clustering (Step 6)'s land-cover coherence check is *optional*
   and only benefits from the hybrid existing (Step 3/4) — the
   clustering itself has no hard dependency on RF/U-Net at all.
-- XGBoost (Step 7) needs hotspot clustering's `primary_cluster` feature
-  (Step 6).
+- XGBoost (Step 7) reads the land-cover fractions and seasonal NDVI/NDBI
+  columns that hotspot clustering (Step 6) writes into `hotspot_clusters.csv`,
+  but not the cluster labels themselves (see Step 7).
 - CNN (Step 8) needs the hybrid raster pushed to GCS (Step 4).
 - The heat-model diagnostic (Step 10) needs XGBoost (Step 7) + CNN
   (Step 9).
@@ -142,8 +143,11 @@ python scripts/train_heat_model_xgboost.py --force-retrain
 ```
 
 `--force-retrain` — same skip-if-exists caching pattern again.
-`primary_cluster` from Step 6 is one of its input features, so this must
-run *after* hotspot clustering.
+It reads the land-cover fractions and seasonal NDVI/NDBI columns from Step
+6's `hotspot_clusters.csv`, so this must run *after* hotspot clustering. It
+deliberately does **not** use the cluster labels (`primary_cluster`): the
+clustering is built on `lst_dry`, which is identical to XGBoost's target, so
+using the label leaked the answer (dropped 2026-09-21).
 
 **Check MLflow**: newest `xgboost` run in `heat_model_s5` — params +
 `test_rmse`/`test_r2`/`ndvi_vegetation_slope` metrics.
@@ -205,7 +209,11 @@ itself a useful result.
 
 One-time prerequisites (skip if the files already exist):
 - `data/interim/sensitivity_pillar.csv` — `python scripts/build_sensitivity_pillar.py`
-  (no Earth Engine call; uses the cached subzone polygons).
+  (no Earth Engine call; uses the cached subzone polygons). It applies
+  `MIN_RESIDENTS_FOR_RANKING` (500): subzones below it get no sensitivity and are
+  not ranked (211 of 332 are). After changing that setting rebuild with
+  `--force`, then rerun the three commands above; the score scripts refuse a
+  pillar file that predates the rule.
 - `data/interim/modis_heldout_lst.csv` — `python scripts/build_modis_heldout.py`
   (uses Earth Engine). The bands script reads it for its exposure-noise
   level and stops with a clear message if it's missing.

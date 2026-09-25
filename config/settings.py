@@ -194,6 +194,17 @@ SENSITIVITY_ELDERLY_WEIGHT = 0.5
 # "Sensitivity specification" table). The 50/50 split above is still a placeholder.
 SENSITIVITY_POPULATION_MEASURE = "density"
 
+# A subzone needs at least this many residents to be RANKED. Below it the
+# sensitivity pillar is undefined (NaN) and the subzone is left out of the score,
+# the bands and every top-N. Why: the elderly share of a tiny population is
+# unstable (SE ~ sqrt(p(1-p)/n): +-1.6 pp at 500 residents against an island share
+# of 15%, +-5 pp at 50) and resident counts say nothing about workers -- before
+# this rule Loyang West (220 residents, 86% elderly) was ranked #1 and Tuas North
+# (30 residents) #20. 121 of 332 subzones fall under 500 (parks, reserves,
+# industrial estates, water). Decided 2026-09-25; the top-20 is the same set of
+# leavers at 500 and 1000. Set to 0 to rank everything (old behaviour).
+MIN_RESIDENTS_FOR_RANKING = 500
+
 # Which greenery-fraction source feeds the adaptive-capacity pillar's
 # canonical `greenery_fraction` column: "landcover" (the validated RF/U-Net
 # hybrid, see src/landcover/zonal.py) or "ndvi" (the older NDVI-threshold

@@ -29,8 +29,8 @@ def test_density_and_count_measures():
     elderly = pd.Series([0.1, 0.1, 0.0, 0.1])
     area = pd.Series([1.0, 8.0, 2.0, 0.5])  # densities: 1000, 500, 0, 4000 per km2 -> count ranks #1 first, density #3
 
-    density = compute_sensitivity_raw(pop, elderly, area, "density")
-    count = compute_sensitivity_raw(pop, elderly, area, "count")
+    density = compute_sensitivity_raw(pop, elderly, area, "density", min_residents=0)
+    count = compute_sensitivity_raw(pop, elderly, area, "count", min_residents=0)
     assert np.allclose(density, 0.5 * normalize(pop / area) + 0.5 * normalize(elderly))
     assert np.allclose(count, 0.5 * normalize(pop) + 0.5 * normalize(elderly))
     assert density.idxmax() != count.idxmax(), "fixture must make count and density disagree on the top subzone"
@@ -41,9 +41,39 @@ def test_zero_or_missing_area_gives_zero_density_not_inf():
     pop = pd.Series([1000.0, 4000.0, 0.0, 2000.0])
     elderly = pd.Series([0.2, 0.1, 0.0, 0.3])
     area = pd.Series([1.0, 0.0, np.nan, 0.5])
-    result = compute_sensitivity_raw(pop, elderly, area, "density")
+    result = compute_sensitivity_raw(pop, elderly, area, "density", min_residents=0)
     assert np.isfinite(result).all(), f"zero/missing area must not leak inf/NaN into the pillar: {result.tolist()}"
     print("PASS: zero or missing area is treated as density 0, not inf/NaN")
+
+
+def test_min_residents_leaves_tiny_subzones_unranked():
+    pop = pd.Series([220.0, 4000.0, 30.0, 8000.0, 12000.0])
+    elderly = pd.Series([0.86, 0.10, 0.0, 0.20, 0.15])  # the 220-resident subzone has an extreme share
+    area = pd.Series([2.0, 1.0, 4.0, 2.0, 1.5])
+
+    result = compute_sensitivity_raw(pop, elderly, area, "density", min_residents=500)
+    assert result.isna().tolist() == [True, False, True, False, False], result.tolist()
+
+    # The tiny subzones must not set the scale: dropping them changes nothing.
+    kept = pop >= 500
+    alone = compute_sensitivity_raw(pop[kept], elderly[kept], area[kept], "density", min_residents=500)
+    assert np.allclose(result[kept], alone), "tiny subzones leaked into the min-max range of the rankable ones"
+    assert result[kept].between(0, 1).all(), "rankable subzones should sit on a 0-1 scale"
+    print("PASS: subzones under min_residents are NaN and do not stretch the scale of the rest")
+
+
+def test_min_residents_threshold_is_inclusive_and_all_below_raises():
+    pop = pd.Series([499.0, 500.0, 900.0])
+    elderly = pd.Series([0.1, 0.2, 0.3])
+    area = pd.Series([1.0, 1.0, 1.0])
+    result = compute_sensitivity_raw(pop, elderly, area, "density", min_residents=500)
+    assert result.isna().tolist() == [True, False, False], "500 residents should be rankable at min_residents=500"
+    try:
+        compute_sensitivity_raw(pop, elderly, area, "density", min_residents=10_000)
+    except ValueError:
+        print("PASS: the threshold is inclusive, and a threshold nobody meets raises")
+        return
+    raise AssertionError("expected ValueError when no subzone meets min_residents")
 
 
 def test_unknown_measure_raises():
@@ -80,6 +110,7 @@ def _make_pillar_table(n=120, seed=3):
     })
     df["sensitivity_raw"] = compute_sensitivity_raw(
         df["population_total"], df["elderly_proportion"], df["area_km2"], SENSITIVITY_POPULATION_MEASURE,
+        min_residents=0,
     )
     return df
 
@@ -110,6 +141,8 @@ def test_spec_comparison_rejects_an_old_pillar_table():
 def main():
     test_density_and_count_measures()
     test_zero_or_missing_area_gives_zero_density_not_inf()
+    test_min_residents_leaves_tiny_subzones_unranked()
+    test_min_residents_threshold_is_inclusive_and_all_below_raises()
     test_unknown_measure_raises()
     test_subzone_areas_are_projected_km2()
     test_spec_comparison_shape_and_reference_row()
