@@ -31,7 +31,7 @@ If you want the full picture start to finish:
 3. **04** — the CNN heat model (reuses U-Net's architecture almost verbatim — read 03 first)
 4. **05** — XGBoost (a completely separate, tabular half of the heat model)
 5. **06** — how RF + U-Net get combined after training
-6. **07** — the one unsupervised model in the project
+6. **07** — the unsupervised clustering model (the priority score's PCA weighting is the project's other unsupervised step; it isn't covered in this folder)
 
 ## The one-sentence version of each model's "why"
 

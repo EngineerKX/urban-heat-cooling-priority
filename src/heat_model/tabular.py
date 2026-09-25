@@ -1,15 +1,15 @@
 """S5 (C2) subzone-level tabular half: XGBoost regression from land-cover /
-seasonal-index / population / hotspot-cluster features to raw LST, plus a
-concrete counterfactual mechanism ("what if this subzone had more green
-cover?"). Target is `lst_native30` (least-processed LST variant) rather
-than `lst_regress10`, since the regression variant was itself fit on
+seasonal-index / population features to raw LST, plus a concrete
+counterfactual mechanism ("what if this subzone had more green cover?").
+Target is `lst_native30` (least-processed LST variant) rather than
+`lst_regress10`, since the regression variant was itself fit on
 NDVI/NDBI/NDWI -- reusing those as XGBoost inputs against that target would
 be circular.
 
-Pure join of already-built per-subzone CSVs (heat variants, S4 hotspot
-clusters -- which already carries seasonal indices AND land-cover
-fractions from Item 1 -- and the sensitivity pillar's population table).
-No new fetch of any kind.
+Pure join of already-built per-subzone CSVs (heat variants, the S4 hotspot
+feature table -- which carries seasonal indices AND land-cover fractions from
+Item 1 -- and the sensitivity pillar's population table). No new fetch of any
+kind. The S4 cluster label itself is NOT a feature, see XGB_FEATURE_COLUMNS.
 """
 
 from pathlib import Path
@@ -24,12 +24,17 @@ from sklearn.model_selection import train_test_split
 from config.settings import RANDOM_SEED, XGB_LEARNING_RATE, XGB_MAX_DEPTH, XGB_N_ESTIMATORS, XGB_SUBSAMPLE
 
 XGB_TARGET_COLUMN = "lst_native30"
+# The S4 hotspot-typology label (`primary_cluster`) was a feature until 2026-09-21 and is
+# deliberately excluded now: the clustering takes `lst_dry` as an input, and `lst_dry` is
+# identical to this model's target `lst_native30`, so the label carried part of the answer
+# (indirect target leakage). Dropping it cost ~0.03 test R2 (about +0.08 C RMSE) -- the
+# model does not depend on it.
 XGB_FEATURE_COLUMNS = [
     "fraction_vegetation", "fraction_built_up", "fraction_bare", "fraction_water",
     "ndvi_dry", "ndvi_wet", "ndbi_dry", "ndbi_wet",
-    "population_total", "elderly_proportion", "primary_cluster",
+    "population_total", "elderly_proportion",
 ]
-XGB_CATEGORICAL_COLUMNS = ["primary_cluster"]
+XGB_CATEGORICAL_COLUMNS = []  # none at present; kept so a categorical feature can be re-added cleanly
 
 
 def build_xgb_training_table(
@@ -136,8 +141,8 @@ def predict_counterfactual_subzone(
     feature_columns=XGB_FEATURE_COLUMNS,
 ) -> dict:
     """`row_df` is a single-row DataFrame (e.g. `df[df.subzone_id == X]`) so
-    column dtypes (notably primary_cluster's 'category' dtype) pass through
-    unchanged -- a bare pd.Series round-trip can silently lose that.
+    column dtypes (notably any 'category' feature) pass through unchanged --
+    a bare pd.Series round-trip can silently lose that.
 
     Mechanism: redistribute the vegetation-fraction delta proportionally
     out of built-up/bare (see redistribute_vegetation_fraction), bump

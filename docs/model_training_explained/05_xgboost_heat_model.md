@@ -23,7 +23,7 @@ convincing than either model's answer alone.
 XGB_FEATURE_COLUMNS = [
     "fraction_vegetation", "fraction_built_up", "fraction_bare", "fraction_water",
     "ndvi_dry", "ndvi_wet", "ndbi_dry", "ndbi_wet",
-    "population_total", "elderly_proportion", "primary_cluster",
+    "population_total", "elderly_proportion",
 ]
 ```
 
@@ -36,9 +36,12 @@ pipeline stages, and `build_xgb_training_table()` just inner-joins them on
   the S4 hotspot-clustering feature table (file 07), which itself already
   computed these.
 - Population + elderly proportion — from the sensitivity pillar (SingStat
-  census data).
-- `primary_cluster` — the hotspot-typology cluster id each subzone was
-  assigned to (file 07's *output* feeding forward as an *input* here).
+  census data). Note the priority score's sensitivity pillar now uses population
+  *density* (residents per km²), but this model still takes the raw *count*
+  (`population_total`); whether density would predict temperature better
+  hasn't been tested.
+- The hotspot-typology cluster label (file 07) is deliberately **not** a
+  feature — see "Why the cluster label is not a feature" below.
 
 **Filtering here is an inner join, not a season/cloud filter**: if a subzone
 is missing from any of the three source tables, it's silently dropped from
@@ -47,14 +50,17 @@ silent). Since all three sources are themselves already built from the same
 subzone boundary list, drops should be rare — a large one is a genuine
 signal something upstream broke, not expected behavior.
 
-**Why `primary_cluster` is cast to pandas `category` dtype**, not left as a
-plain integer: cluster ids are labels (Cluster 0, 1, 2...), not an ordered
-quantity — cluster "2" isn't twice cluster "1" in any meaningful sense.
-Feeding it in as a plain int would let XGBoost's tree splits implicitly
-treat it as ordered (e.g. "cluster ≤ 1.5"), which would be a made-up
-relationship. `enable_categorical=True` on the model tells XGBoost to use
-its native categorical-split handling instead, which doesn't impose that
-false ordering.
+**Why the cluster label is not a feature** (changed 2026-09-21). It used to
+be: `primary_cluster`, file 07's output, fed forward as an input. But file
+07's clustering takes `lst_dry` as one of its six inputs, and `lst_dry` is
+the very same number as this model's target `lst_native30` (identical in
+all 332 subzones). So the cluster label was partly built from the answer and
+the model could read some of it back — indirect target leakage. Removing it
+cost only a little held-out accuracy (mean over 30 random 80/20 splits: R²
+0.81 → 0.78, RMSE 1.06 → 1.13 °C), so the model does not depend on it.
+`tests/test_heat_model_tabular.py::test_no_target_derived_features` stops it
+(or any LST column) coming back. The pandas `category` / `enable_categorical`
+handling stays in the code, unused, for any future categorical feature.
 
 ## Target: same circularity concern as the CNN, same solution
 
@@ -93,7 +99,7 @@ hyperparameter is actually balancing:
   high learning rate with few estimators can fit the training set's noise
   too eagerly, while many small steps average out that noise more.
 - **`max_depth=4`**: a shallow tree depth on purpose. With only ~330
-  subzones and 11 features, deep trees (the XGBoost default is often 6)
+  subzones and 10 features, deep trees (the XGBoost default is often 6)
   would have enough capacity to memorize individual subzones rather than
   learn generalizable splits — capping depth at 4 keeps each tree simple
   enough that it can only capture broad, more-likely-to-generalize

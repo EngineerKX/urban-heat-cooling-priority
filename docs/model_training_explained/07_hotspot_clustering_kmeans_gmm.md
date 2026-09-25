@@ -1,4 +1,4 @@
-# Hotspot-typology clustering (K-means / GMM) — the unsupervised model
+# Hotspot-typology clustering (K-means / GMM) — the unsupervised clustering model
 
 Code: [`src/hotspots/cluster.py`](../../src/hotspots/cluster.py).
 

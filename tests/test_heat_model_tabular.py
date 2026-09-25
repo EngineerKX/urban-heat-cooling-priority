@@ -53,10 +53,17 @@ def _make_synthetic_table(seed=42, n=80):
         "ndbi_dry": ndbi_dry, "ndbi_wet": ndbi_wet,
         "population_total": rng.uniform(1000, 20000, size=n),
         "elderly_proportion": rng.uniform(0.05, 0.25, size=n),
-        "primary_cluster": rng.integers(0, 3, size=n),
     })
-    df["primary_cluster"] = df["primary_cluster"].astype("category")
     return df
+
+
+def test_no_target_derived_features():
+    """primary_cluster (clustered on lst_dry, which equals the target lst_native30) leaked the
+    answer into the model until 2026-09-21. Guard against it -- or any LST column -- coming back."""
+    leaky = [c for c in XGB_FEATURE_COLUMNS if c == "primary_cluster" or c.startswith("lst")]
+    assert not leaky, f"target-derived column(s) in XGB_FEATURE_COLUMNS: {leaky}"
+    assert XGB_TARGET_COLUMN not in XGB_FEATURE_COLUMNS
+    print("PASS: no target-derived column (LST or the S4 cluster label) is an XGBoost feature")
 
 
 def test_redistribute_vegetation_fraction_preserves_total():
@@ -97,6 +104,7 @@ def test_predict_counterfactual_subzone_direction():
 
 
 def main():
+    test_no_target_derived_features()
     test_redistribute_vegetation_fraction_preserves_total()
     test_redistribute_vegetation_fraction_clamps_at_upper_bound()
     test_predict_counterfactual_subzone_direction()
