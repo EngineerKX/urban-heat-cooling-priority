@@ -41,3 +41,21 @@ If you want the full picture start to finish:
 - **CNN heat regressor**: same architecture as U-Net, swapped from classifying land cover to predicting a continuous temperature value — because temperature has real spatial structure too (a hot pixel's neighbors are usually also hot).
 - **XGBoost**: a second, independent way to estimate the same thing (subzone-level LST) from tabular features, used as a cross-check against the CNN rather than a replacement for it.
 - **K-means/GMM**: finds heat "typologies" (e.g. "hot + dry + built-up" vs "cool + wet + green") without being told the answer in advance — genuinely exploratory, unlike the four supervised models above it.
+
+## Status of these docs
+
+Last checked against the code, settings and saved results on 2026-09-26.
+
+- **Re-verified, unchanged**: every hyperparameter and data-window value
+  quoted in 01–04 matches `config/settings.py`; the land-cover numbers in 06
+  match `data/processed/landcover/evaluation/`; the U-Net and CNN run numbers
+  in 03/04 still describe the current models (weights last rebuilt 2026-09-18).
+- **Updated 2026-09-26**: 05 (current held-out score, feature importance, how
+  far to trust the what-if, trains-on-all-332-subzones note, corrected
+  ablation figures), 06 (does the classifier choice move the priority list),
+  07 (what the clustering found, the `lst_dry` overlap with XGBoost's target,
+  and that the vegetation half of the coherence check doesn't pass).
+- **Deliberately not covered here**: things downstream of training — the
+  500-resident ranking rule, the all-places view, the confidence bands, PCA on
+  z-scored pillars. They change how the score is built and read, not how any
+  model here is trained.

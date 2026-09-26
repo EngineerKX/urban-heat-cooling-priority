@@ -62,6 +62,31 @@ the last evaluation, within statistical noise for a 296-point validation
 set), in exchange for a much larger macro-F1 gain (0.547 → 0.652) from no
 longer being structurally blind to an entire class.
 
+## Does the classifier choice change the priority list? (checked 2026-09-26)
+
+Everything above is about how good the land-cover *map* is. A separate
+question is whether it changes what the project finally reports — which
+subzones make the top 20 for cooling. `scripts/build_landcover_swap_comparison.py`
+answers that by rerunning the priority score with the greenery fraction taken
+from each raster in turn (everything else held fixed) and counting how many of
+the top 20 change against the production hybrid. It covers the 211 subzones
+that are actually ranked:
+
+| Greenery taken from | Top-20 subzones changed | Ranking similarity to hybrid (Spearman) |
+|---|---|---|
+| U-Net | 0 | 0.9996 |
+| RF | 2 | 0.9985 |
+| NDVI-threshold proxy (the older approach) | 4 | 0.990 |
+
+So for the ranking the choice barely matters. Two reasons, both noted in
+`validation/score_validation/landcover_impact.py`: only the *vegetation* share
+of each raster ever reaches the score, so U-Net's failure on "bare" matters
+only when it moves pixels into or out of vegetation; and a constant
+misclassification rate is cancelled exactly by the score's normalisation —
+only errors that differ from subzone to subzone can move a rank. The hybrid's
+case therefore stays what the section above says — a better land-cover map
+with no blind class — but it is not what decides the priority list.
+
 ## A subtlety worth knowing: NaN vs. 0.0 as "invalid," inconsistently, by source
 
 `_to_valid_bool()` exists because RF's and U-Net's exported rasters don't

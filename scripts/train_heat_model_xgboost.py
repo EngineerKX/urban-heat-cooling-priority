@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 """Train S5's XGBoost tabular half (C2) -- subzone-level LST regression
-from land-cover / seasonal-index / population / hotspot-cluster features.
-New pipeline stage: src/heat_model/ was empty, no source notebook to
-migrate. Runs natively on Windows, CPU-only, no GPU needed (unlike the CNN
-half, which trains in Colab -- see notebooks/colab_training/train_heat_cnn.ipynb).
+from land-cover / seasonal-index / population features (the S4 hotspot
+cluster label is deliberately not a feature -- see
+src/heat_model/tabular.py::XGB_FEATURE_COLUMNS). New pipeline stage:
+src/heat_model/ was empty, no source notebook to migrate. Runs natively on
+Windows, CPU-only, no GPU needed (unlike the CNN half, which trains in
+Colab -- see notebooks/colab_training/train_heat_cnn.ipynb).
 
 Usage: python scripts/train_heat_model_xgboost.py [--force-retrain]
 """

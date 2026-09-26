@@ -28,6 +28,14 @@ This is also the one place `WET_SEASON_MONTHS` (file 01, §1) actually gets
 used — everywhere else in the pipeline only ever builds the single
 dry-season composite.
 
+**One consequence worth knowing:** `lst_dry` here is the identical number to
+XGBoost's target `lst_native30` (file 05) — the two match in all 332
+subzones. So the cluster label is partly built from XGBoost's answer, and
+must never be fed to a model that predicts it. That is why the label was
+removed from XGBoost's features on 2026-09-21. The same feature table does
+still supply XGBoost's land-cover fractions and dry/wet NDVI/NDBI — just
+not the label.
+
 ## Preparing the features: why standardize, why drop NaN
 
 ```python
@@ -110,6 +118,24 @@ different random initializations and keeping the best result is the
 standard defense against landing on a bad local optimum — not a tuned
 value, just the conventional way both algorithms are normally run.
 
+## What it actually found
+
+K-means beat GMM on silhouette and the sweep settled on **k = 4**
+(`primary_cluster_method` is `kmeans` for all 332 subzones). The four groups,
+from `data/processed/hotspot_cluster_profile.csv`:
+
+| Cluster | Subzones | Dry-season LST | Drop, dry → wet | Vegetation | Built-up | Water | Plain reading |
+|---|---|---|---|---|---|---|---|
+| 3 | 92 | 42.3 °C | 2.7 °C | 14% | 83% | 2% | hottest, densely built up |
+| 0 | 142 | 39.6 °C | 2.6 °C | 29% | 67% | 2% | warm, mostly built up with some green |
+| 2 | 31 | 39.9 °C | 6.2 °C | 9% | 75% | 14% | least vegetated, water-heavy, big seasonal swing |
+| 1 | 67 | 36.5 °C | 2.1 °C | 69% | 22% | 7% | coolest, green |
+
+The "plain reading" column is a description of the numbers, not a name used
+in the code. Cluster 2 is the distinctive one: its dry-to-wet temperature
+drop is more than double the other three, which is exactly the kind of
+difference the seasonal-pair features were chosen to expose.
+
 ## The coherence check — validating an unsupervised result without labels
 
 You can't compute "accuracy" for clustering the way you can for a
@@ -124,3 +150,12 @@ This isn't circular — land-cover fractions were never part of what the
 clustering algorithm saw — it's an independent check that the clusters the
 algorithm found on its own actually correspond to something physically
 real, rather than an artifact of the six input features alone.
+
+**Current result: half a pass.** The hottest cluster (3) is also the most
+built-up one, so the built-up half of the check passes. The vegetation half
+does not: the least-vegetated cluster is 2 (9%), not the hottest one (14%).
+That doesn't make the clustering wrong — cluster 2 is a different kind of
+place (much more water, a far larger seasonal swing, cooler in the dry season
+than cluster 3) and separating it out is what a typology is for — but it
+means the check as written ("hottest = most built-up = least vegetated")
+holds for one of its two conditions, not both.
