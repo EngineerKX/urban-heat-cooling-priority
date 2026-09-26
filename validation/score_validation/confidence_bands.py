@@ -175,7 +175,8 @@ def bootstrap_priority_score(
           f"(0.1-0.9), {int((p <= 0.1).sum())} <=0.1.")
     if not has_adaptive_noise:
         print("⚠️  No adaptive-capacity noise model was supplied — bands reflect exposure uncertainty only.")
-    print("ℹ️  Sensitivity pillar is not perturbed: its uncertainty is formula choice, not noise — see the "
-          "sensitivity-specification table (validation/score_validation/sensitivity_specs.py) and the module docstring.")
+    if weighting != "heat_greenery":
+        print("ℹ️  Sensitivity pillar is not perturbed: its uncertainty is formula choice, not noise — see the "
+              "sensitivity-specification table (validation/score_validation/sensitivity_specs.py) and the module docstring.")
 
     return result

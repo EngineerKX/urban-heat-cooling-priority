@@ -203,7 +203,11 @@ python scripts/build_priority_score_confidence_bands.py --force
 In that order: the pillar reads the hybrid raster; `build_priority_score.py`
 has no cache and always recomputes (it also rewrites the PCA-vs-equal
 weighting and sensitivity-specification tables); the bands are a bootstrap
-over the finished score. Back up `data/processed/` first if you want to
+over the finished score. Both scripts produce two views of the score (defined
+in `src/priority_score/lenses.py`): *residents* (heat + people + greenery,
+subzones under 500 residents not ranked) and *all places* (heat + greenery
+only, every subzone, so industrial and port areas are included). The map and
+breakdown pages have a View selector for them. Back up `data/processed/` first if you want to
 compare old and new rankings — how much the top 20 moved after a retrain is
 itself a useful result.
 

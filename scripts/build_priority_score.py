@@ -8,7 +8,9 @@ locked eval rules, and additionally writes a single production
 packaging the already-computed result for the app to consume, not new
 modeling. Also writes the PCA-vs-equal weighting comparison (the C1
 benchmark): how far the two weightings disagree on the ranking, and which
-top-N subzones each one adds or removes.
+top-N subzones each one adds or removes, and the second, all-places view
+(`priority_score_all_places.csv`: heat + missing greenery only, every subzone,
+see src/priority_score/lenses.py).
 
 Usage: python scripts/build_priority_score.py [--toy]
 """
@@ -23,6 +25,7 @@ import pandas as pd
 
 from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join
+from src.priority_score.lenses import LENSES
 from src.priority_score.score import build_score
 from validation.score_validation.rank_impact import run_rank_impact, run_weighting_comparison
 from validation.score_validation.sensitivity_specs import (
@@ -79,6 +82,22 @@ def main(toy_mode: bool = False):
     PRIORITY_SCORE_OUT.parent.mkdir(parents=True, exist_ok=True)
     priority_df.to_csv(PRIORITY_SCORE_OUT, index=False)
     print(f"\nSaved: {PRIORITY_SCORE_OUT}")
+
+    # All-places view: heat + missing greenery only, every subzone (src/priority_score/lenses.py).
+    lens = LENSES["all_places"]
+    print(f"\n=== All-places score ({lens['weighting']}, reference variant: {REFERENCE_VARIANT}) ===")
+    all_df, _ = load_and_join(toy_mode, include_unranked=lens["include_unranked"])
+    all_score, _ = build_score(all_df, REFERENCE_VARIANT, lens["weighting"])
+    all_places_df = pd.DataFrame({
+        "subzone_id": all_df["subzone_id"],
+        "priority_score": all_score,
+        "exposure_variant": REFERENCE_VARIANT,
+        "weighting": lens["weighting"],
+    }).sort_values("priority_score", ascending=False)
+    print(f"{len(all_places_df)} subzones scored (the residents view ranks {len(priority_df)}).")
+    print(all_places_df.head(10).to_string(index=False))
+    all_places_df.to_csv(lens["score_csv"], index=False)
+    print(f"\nSaved: {lens['score_csv']}")
 
 
 if __name__ == "__main__":

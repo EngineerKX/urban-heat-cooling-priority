@@ -86,11 +86,33 @@ def test_equal_weighting_is_unchanged():
     print("PASS: equal weighting is still the plain mean of the min-max pillars")
 
 
+def test_heat_greenery_ignores_sensitivity_and_covers_unranked_subzones():
+    """The all-places view: 0.5 exposure + 0.5 greenery deficit, and it must
+    work for subzones whose sensitivity is NaN (too few residents to have one)
+    or for a table with no sensitivity column at all."""
+    df = _make_table()
+    expected = 0.5 * normalize(df["lst_native30"]) + 0.5 * normalize(1 - df["greenery_fraction"])
+
+    with_nan = df.assign(sensitivity_raw=np.where(df.index % 3 == 0, np.nan, df["sensitivity_raw"]))
+    score, weights = build_score(with_nan, "lst_native30", "heat_greenery")
+    assert score.notna().all(), "NaN sensitivity must not leak into the all-places score"
+    assert np.allclose(score, expected) and score.between(0, 1).all()
+    assert weights == {"exposure": 0.5, "sensitivity": 0.0, "adaptive_deficit": 0.5}, weights
+
+    no_column, _ = build_score(df.drop(columns="sensitivity_raw"), "lst_native30", "heat_greenery")
+    assert np.allclose(no_column, expected), "the all-places score must not need a sensitivity column"
+
+    changed_sensitivity, _ = build_score(df.assign(sensitivity_raw=df["sensitivity_raw"][::-1].values), "lst_native30", "heat_greenery")
+    assert np.allclose(changed_sensitivity, expected), "the all-places score must not depend on sensitivity"
+    print("PASS: heat_greenery = mean of exposure and greenery deficit, independent of sensitivity (incl. NaN / absent)")
+
+
 def main():
     test_pca_weights_sum_to_one_and_score_stays_on_unit_scale()
     test_identical_pillars_give_equal_weights()
     test_pca_weights_do_not_follow_pillar_skew()
     test_equal_weighting_is_unchanged()
+    test_heat_greenery_ignores_sensitivity_and_covers_unranked_subzones()
     print("\nAll score.py checks passed.")
 
 

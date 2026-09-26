@@ -21,12 +21,26 @@ from streamlit_folium import st_folium
 
 from config.settings import MIN_RESIDENTS_FOR_RANKING, PROCESSED_DIR, SG_CENTER, SUBZONE_ID_PROPERTY, TOP_N
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
+from src.priority_score.lenses import DEFAULT_LENS, LENSES
 
 st.set_page_config(page_title="Island Map — Urban Heat & Cooling Priority", page_icon="🗺️", layout="wide")
 st.title("🗺️ Island-wide cooling-priority map")
 
-PRIORITY_SCORE_PATH = PROCESSED_DIR / "priority_score.csv"
-BANDS_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
+# Which view of the score to map (see src/priority_score/lenses.py). Kept in
+# session_state under our own key because a widget's own state is dropped when
+# you navigate to another page; the breakdown page reads the same key.
+lens_keys = list(LENSES)
+remembered = st.session_state.get("priority_lens", DEFAULT_LENS)
+lens_key = st.radio(
+    "View", lens_keys, index=lens_keys.index(remembered if remembered in lens_keys else DEFAULT_LENS),
+    format_func=lambda key: LENSES[key]["label"], horizontal=True,
+)
+st.session_state["priority_lens"] = lens_key
+lens = LENSES[lens_key]
+st.caption(lens["description"])
+
+PRIORITY_SCORE_PATH = lens["score_csv"]
+BANDS_PATH = lens["bands_csv"]
 P_TOP_COL = f"p_top{TOP_N}"
 
 if not PRIORITY_SCORE_PATH.exists():
@@ -35,20 +49,20 @@ if not PRIORITY_SCORE_PATH.exists():
 
 
 @st.cache_data
-def load_map_data():
+def load_map_data(score_path: str, bands_path: str):
     geojson = fetch_subzones_geojson()
     subzones_gdf = as_geodataframe(geojson)
-    score_df = pd.read_csv(PRIORITY_SCORE_PATH)
+    score_df = pd.read_csv(score_path)
     merged = subzones_gdf.merge(score_df, left_on=SUBZONE_ID_PROPERTY, right_on="subzone_id", how="left")
-    if BANDS_PATH.exists():
-        bands_df = pd.read_csv(BANDS_PATH)
+    if Path(bands_path).exists():
+        bands_df = pd.read_csv(bands_path)
         merged = merged.merge(bands_df, on="subzone_id", how="left")
         if P_TOP_COL in merged.columns:
             merged[P_TOP_COL] = merged[P_TOP_COL].round(2)
     return merged
 
 
-gdf = load_map_data()
+gdf = load_map_data(str(PRIORITY_SCORE_PATH), str(BANDS_PATH))
 has_bands = "band_width" in gdf.columns
 
 color_options = {"Priority score": "priority_score"}
@@ -62,11 +76,13 @@ value_col = color_options[color_by]
 plot_gdf = gdf[gdf[value_col].notna()].copy()
 n_missing = len(gdf) - len(plot_gdf)
 if n_missing:
-    st.caption(
-        f"{n_missing} subzone(s) are not drawn: they have no value for '{color_by}'. Subzones with fewer than "
-        f"{MIN_RESIDENTS_FOR_RANKING} residents (parks, reserves, industrial estates) are not ranked, because a "
-        f"resident-based sensitivity can't be estimated for them."
+    reason = (
+        f" Subzones with fewer than {MIN_RESIDENTS_FOR_RANKING} residents (parks, reserves, industrial estates) are not "
+        f"ranked in this view, because a resident-based sensitivity can't be estimated for them; switch to "
+        f"'{LENSES['all_places']['label']}' to see them."
+        if lens_key == "residents" else ""
     )
+    st.caption(f"{n_missing} subzone(s) are not drawn: they have no value for '{color_by}'.{reason}")
 
 vmin, vmax = float(plot_gdf[value_col].min()), float(plot_gdf[value_col].max())
 colormap = cm.linear.YlOrRd_09.scale(vmin, vmax)
@@ -104,6 +120,14 @@ if clicked:
     clicked_id = clicked.get("properties", {}).get(SUBZONE_ID_PROPERTY)
     if clicked_id:
         st.session_state["selected_subzone_id"] = clicked_id
+
+with st.expander(f"Top {TOP_N} subzones in this view"):
+    top_table = gdf[gdf["priority_score"].notna()].sort_values("priority_score", ascending=False).head(TOP_N)
+    top_cols = ["subzone_id", "priority_score"] + ([P_TOP_COL] if P_TOP_COL in top_table.columns else [])
+    st.dataframe(
+        top_table[top_cols].rename(columns={"subzone_id": "Subzone", "priority_score": "Priority score", P_TOP_COL: f"Chance of top-{TOP_N}"}),
+        hide_index=True, use_container_width=True,
+    )
 
 selected = st.session_state.get("selected_subzone_id")
 if selected:

@@ -18,6 +18,7 @@ import streamlit as st
 
 from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join
+from src.priority_score.lenses import DEFAULT_LENS, LENSES
 from src.priority_score.score import build_score
 from src.utils.geo import normalize
 
@@ -25,21 +26,34 @@ st.set_page_config(page_title="Subzone Breakdown — Urban Heat & Cooling Priori
 st.title("📊 Per-subzone score breakdown")
 
 HOTSPOT_CLUSTERS_PATH = PROCESSED_DIR / "hotspot_clusters.csv"
-BANDS_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
-if not (PROCESSED_DIR / "priority_score.csv").exists():
+# Same view selector and session key as the Island Map page (see
+# src/priority_score/lenses.py): the map's choice carries over to this page.
+lens_keys = list(LENSES)
+remembered = st.session_state.get("priority_lens", DEFAULT_LENS)
+lens_key = st.radio(
+    "View", lens_keys, index=lens_keys.index(remembered if remembered in lens_keys else DEFAULT_LENS),
+    format_func=lambda key: LENSES[key]["label"], horizontal=True,
+)
+st.session_state["priority_lens"] = lens_key
+lens = LENSES[lens_key]
+st.caption(lens["description"])
+BANDS_PATH = lens["bands_csv"]
+
+if not lens["score_csv"].exists():
     st.warning("Priority score not built yet — run `python scripts/build_priority_score.py` first.")
     st.stop()
 
 
 @st.cache_data
-def load_score_table():
-    df, _heldout = load_and_join(toy_mode=False)
-    score, weights = build_score(df, REFERENCE_VARIANT, "pca")
+def load_score_table(lens_key: str):
+    view = LENSES[lens_key]
+    df, _heldout = load_and_join(toy_mode=False, include_unranked=view["include_unranked"])
+    score, weights = build_score(df, REFERENCE_VARIANT, view["weighting"])
     return df.assign(priority_score=score), weights
 
 
-df, weights = load_score_table()
+df, weights = load_score_table(lens_key)
 subzone_ids = sorted(df["subzone_id"].astype(str).unique())
 
 selected = st.session_state.get("selected_subzone_id")
@@ -54,10 +68,12 @@ if selected is None:
 row = df[df["subzone_id"] == chosen].iloc[0]
 idx = row.name
 
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("Priority score", f"{row['priority_score']:.3f}")
 col2.metric("Exposure (LST)", f"{row[REFERENCE_VARIANT]:.1f}°C")
 col3.metric("Greenery fraction", f"{row['greenery_fraction']:.2f}")
+if "population_total" in row.index and pd.notna(row["population_total"]):
+    col4.metric("Residents", f"{int(row['population_total']):,}")
 
 if BANDS_PATH.exists():
     bands_df = pd.read_csv(BANDS_PATH)
@@ -92,15 +108,19 @@ else:
     st.caption(f"`{BANDS_PATH}` not found — run `python scripts/build_priority_score_confidence_bands.py` to enable this section.")
 
 st.subheader("Pillar contribution")
-exposure_norm = normalize(df[REFERENCE_VARIANT])
-sensitivity_norm = normalize(df["sensitivity_raw"])
-adaptive_deficit_norm = normalize(1 - df["greenery_fraction"])
+pillar_norms = {
+    "Exposure": (normalize(df[REFERENCE_VARIANT]), weights["exposure"], "#2f6fed"),
+    "Sensitivity": (normalize(df["sensitivity_raw"]), weights["sensitivity"], "#f2994a"),
+    "Adaptive deficit": (normalize(1 - df["greenery_fraction"]), weights["adaptive_deficit"], "#27ae60"),
+}
+if lens["weighting"] == "heat_greenery":
+    pillar_norms.pop("Sensitivity")  # the all-places view has no sensitivity term (and no value for small subzones)
 
-pillar_names = ["Exposure", "Sensitivity", "Adaptive deficit"]
-pillar_values = [exposure_norm.loc[idx], sensitivity_norm.loc[idx], adaptive_deficit_norm.loc[idx]]
-pillar_weights = [weights["exposure"], weights["sensitivity"], weights["adaptive_deficit"]]
+pillar_names = list(pillar_norms)
+pillar_values = [norm.loc[idx] for norm, _w, _c in pillar_norms.values()]
+pillar_weights = [w for _norm, w, _c in pillar_norms.values()]
 pillar_contribution = [v * w for v, w in zip(pillar_values, pillar_weights)]
-PILLAR_COLORS = ["#2f6fed", "#f2994a", "#27ae60"]  # fixed order: exposure, sensitivity, adaptive deficit
+PILLAR_COLORS = [c for _norm, _w, c in pillar_norms.values()]  # fixed colour per pillar
 
 fig2 = go.Figure(go.Bar(
     x=pillar_contribution, y=pillar_names, orientation="h", marker_color=PILLAR_COLORS,

@@ -37,9 +37,25 @@ def test_page_loads_without_exception(page_path: Path):
     print(f"PASS: {page_path.name} loads without exception")
 
 
+def test_all_places_view_loads():
+    """The map and breakdown pages in the all-places view. The breakdown page is
+    opened on TUAS NORTH, which the residents view does not rank (30 residents)
+    -- it must appear here and show no sensitivity bar."""
+    for name in ("2_Island_Map.py", "3_Subzone_Breakdown.py"):
+        at = AppTest.from_file(str(REPO_ROOT / "app" / "pages" / name), default_timeout=120)
+        at.session_state["priority_lens"] = "all_places"
+        at.session_state["selected_subzone_id"] = "TUAS NORTH"
+        at.run()
+        assert not at.exception, f"{name} (all-places view): {[e.value for e in at.exception]}"
+        assert at.radio[0].value == "all_places", f"{name}: expected the all-places view, got {at.radio[0].value!r}"
+    assert at.selectbox[0].value == "TUAS NORTH", f"breakdown page should offer TUAS NORTH, got {at.selectbox[0].value!r}"
+    print("PASS: map and breakdown pages load in the all-places view, and TUAS NORTH is selectable there")
+
+
 def main():
     for page_path in PAGES:
         test_page_loads_without_exception(page_path)
+    test_all_places_view_loads()
     print("\nAll app page checks passed.")
 
 

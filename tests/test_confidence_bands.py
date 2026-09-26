@@ -159,8 +159,24 @@ def test_build_score_reference_df_pins_the_scale():
     print("PASS: build_score(reference_df=...) scores against a fixed range; default behaviour unchanged")
 
 
+def test_all_places_view_bootstraps_with_unranked_subzones():
+    """The all-places view scores every subzone, including ones whose
+    sensitivity is NaN (too few residents). The bootstrap must run, stay
+    unbiased and keep every subzone."""
+    df = _make_synthetic_pillar_table(n=60)
+    df.loc[::4, "sensitivity_raw"] = np.nan
+    result = bootstrap_priority_score(
+        df, "lst_native30", "heat_greenery", exposure_noise_std=2.0, adaptive_capacity_noise_std=0.05, n_iterations=200,
+    )
+    assert len(result) == len(df) and result["priority_score_p50"].notna().all(), "NaN sensitivity must not drop or blank a subzone"
+    outside = ((result["priority_score_point"] > result["priority_score_p95"]) | (result["priority_score_point"] < result["priority_score_p05"])).sum()
+    assert outside <= 0.05 * len(df), f"{outside}/{len(df)} point estimates outside their own band"
+    print("PASS: the all-places (heat_greenery) view bootstraps over subzones with NaN sensitivity")
+
+
 def main():
     test_zero_noise_collapses_quantiles_to_point_estimate()
+    test_all_places_view_bootstraps_with_unranked_subzones()
     test_nonzero_noise_gives_monotonic_quantiles()
     test_larger_noise_gives_wider_bands()
     test_adaptive_capacity_noise_std_is_residual_spread_after_affine_fit()

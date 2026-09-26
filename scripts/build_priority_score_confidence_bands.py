@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Build S6 confidence bands on the production priority score.
+"""Build S6 confidence bands on the production priority score, for both views
+(residents and all-places, see src/priority_score/lenses.py).
 Bootstraps using already-built validation error estimates (see
 validation/score_validation/confidence_bands.py's module docstring for the
 exact noise models, the fixed-scale scoring, and the stated limitations) --
@@ -20,10 +21,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.settings import (
-    ADAPTIVE_CAPACITY_SOURCE, EXPOSURE_NOISE_SOURCE, PROCESSED_DIR, REFERENCE_VARIANT, TOP_N,
-)
+from config.settings import ADAPTIVE_CAPACITY_SOURCE, EXPOSURE_NOISE_SOURCE, REFERENCE_VARIANT, TOP_N
 from src.priority_score.io import load_and_join, load_heldout
+from src.priority_score.lenses import DEFAULT_LENS, LENSES
 from validation.score_validation.confidence_bands import (
     adaptive_capacity_noise_std,
     bootstrap_priority_score,
@@ -31,18 +31,12 @@ from validation.score_validation.confidence_bands import (
 )
 from validation.score_validation.decision_impact import noise_floor
 
-OUT_PATH = PROCESSED_DIR / "priority_score_confidence_bands.csv"
 
-
-def main(force: bool = False):
-    if OUT_PATH.exists() and not force:
-        print(f"{OUT_PATH} already exists — skipping recompute (pass --force to rebuild).")
-        return OUT_PATH
-
-    # required=True is deliberate, not a soft warning: running with no exposure
-    # noise would silently produce far-too-tight bands.
-    heldout = load_heldout(required=True)
-    df, _ = load_and_join(toy_mode=False)
+def build_bands(lens_key: str, heldout) -> Path:
+    """Bootstrap one view's score (src/priority_score/lenses.py) and write its bands CSV."""
+    lens = LENSES[lens_key]
+    print(f"\n########## View: {lens['label']} ##########")
+    df, _ = load_and_join(toy_mode=False, include_unranked=lens["include_unranked"])
 
     print(f"Exposure noise source: {EXPOSURE_NOISE_SOURCE}")
     exp_std = exposure_noise_std(df, REFERENCE_VARIANT, heldout)
@@ -60,7 +54,7 @@ def main(force: bool = False):
               f"Bands will reflect exposure uncertainty only.")
         ac_std = None
 
-    result = bootstrap_priority_score(df, REFERENCE_VARIANT, "pca", exp_std, ac_std)
+    result = bootstrap_priority_score(df, REFERENCE_VARIANT, lens["weighting"], exp_std, ac_std)
 
     ranked = result.sort_values("priority_score_point", ascending=False).reset_index(drop=True)
     top = ranked.head(TOP_N)
@@ -79,10 +73,27 @@ def main(force: bool = False):
     print(f"Expected number of the top-{TOP_N} replaced by measurement noise alone: {noise_floor(result, TOP_N):.1f} — "
           f"the yardstick for how many subzones a methodological choice has to move before it matters.")
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    result.to_csv(OUT_PATH, index=False)
-    print(f"\nSaved: {OUT_PATH}")
-    return OUT_PATH
+    out_path = lens["bands_csv"]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    result.to_csv(out_path, index=False)
+    print(f"\nSaved: {out_path}")
+    return out_path
+
+
+def main(force: bool = False):
+    todo = [key for key, lens in LENSES.items() if force or not lens["bands_csv"].exists()]
+    for key, lens in LENSES.items():
+        if key not in todo:
+            print(f"{lens['bands_csv']} already exists — skipping recompute (pass --force to rebuild).")
+    if not todo:
+        return LENSES[DEFAULT_LENS]["bands_csv"]
+
+    # required=True is deliberate, not a soft warning: running with no exposure
+    # noise would silently produce far-too-tight bands.
+    heldout = load_heldout(required=True)
+    for key in todo:
+        build_bands(key, heldout)
+    return LENSES[DEFAULT_LENS]["bands_csv"]
 
 
 if __name__ == "__main__":

@@ -49,7 +49,12 @@ def make_toy_pillars(subzone_ids: pd.Series, seed: int = RANDOM_SEED):
     return sensitivity, adaptive
 
 
-def load_and_join(toy_mode: bool = False):
+def load_and_join(toy_mode: bool = False, include_unranked: bool = False):
+    """Heat + sensitivity + adaptive-capacity pillars joined on subzone_id.
+    By default subzones without a sensitivity value (under
+    MIN_RESIDENTS_FOR_RANKING residents) are left out; `include_unranked=True`
+    keeps them, for the all-places view (src/priority_score/lenses.py), which
+    doesn't use sensitivity."""
     if not HEAT_CSV_PATH.exists():
         raise FileNotFoundError(f"{HEAT_CSV_PATH} not found — run scripts/build_heat_variants.py first.")
     heat = pd.read_csv(HEAT_CSV_PATH)
@@ -86,7 +91,7 @@ def load_and_join(toy_mode: bool = False):
             f"{SENSITIVITY_CSV_PATH} has subzones under {MIN_RESIDENTS_FOR_RANKING} residents with a sensitivity value — "
             f"it predates MIN_RESIDENTS_FOR_RANKING. Rebuild it: python scripts/build_sensitivity_pillar.py --force"
         )
-    if unranked.any():
+    if unranked.any() and not include_unranked:
         df = df[~unranked].reset_index(drop=True)
         print(f"Not ranked: {int(unranked.sum())} subzones have fewer than {MIN_RESIDENTS_FOR_RANKING} residents "
               f"(no usable sensitivity). Ranking {len(df)} subzones.")

@@ -32,6 +32,12 @@ def build_score(
     unperturbed data so noisy draws are scored on the same scale as the
     point estimate.
 
+    `weighting="heat_greenery"` scores exposure and adaptive-capacity deficit
+    only (0.5 / 0.5) and never touches `sensitivity_raw` -- the all-places view
+    of src/priority_score/lenses.py, which includes subzones with too few
+    residents to have a sensitivity value. It says where it is hottest and
+    least green, not how many people that affects.
+
     `weighting="pca"` fits a fresh 1-component PCA on every call, on the
     pillars STANDARDISED to z-scores (correlation-matrix PCA) -- but the score
     itself aggregates the 0-1 min-max pillars with those weights, exactly like
@@ -54,8 +60,18 @@ def build_score(
     """
     ref = df if reference_df is None else reference_df
     exposure_norm = normalize(df[exposure_col], ref[exposure_col])
-    sensitivity_norm = normalize(df["sensitivity_raw"], ref["sensitivity_raw"])
     adaptive_deficit_norm = normalize(1 - df[adaptive_capacity_col], 1 - ref[adaptive_capacity_col])
+
+    if weighting == "heat_greenery":
+        # The "all places" view: heat and missing greenery only, no sensitivity
+        # (so it also works for subzones with too few residents to have one).
+        # Equal weights: with two positively correlated pillars the PCA weights
+        # would be 0.5/0.5 anyway. `weights` keeps the sensitivity key (at 0) so
+        # callers that read all three keep working.
+        score = 0.5 * exposure_norm + 0.5 * adaptive_deficit_norm
+        return score, {"exposure": 0.5, "sensitivity": 0.0, "adaptive_deficit": 0.5}
+
+    sensitivity_norm = normalize(df["sensitivity_raw"], ref["sensitivity_raw"])
 
     pillars = pd.DataFrame({
         "exposure": exposure_norm,
@@ -79,6 +95,6 @@ def build_score(
         weights = dict(zip(pillars.columns, weights_arr))
 
     else:
-        raise ValueError(f"Unknown weighting '{weighting}', expected 'pca' or 'equal'.")
+        raise ValueError(f"Unknown weighting '{weighting}', expected 'pca', 'equal' or 'heat_greenery'.")
 
     return score, weights

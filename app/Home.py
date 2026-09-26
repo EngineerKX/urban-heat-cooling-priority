@@ -53,6 +53,8 @@ checks = [
     ("S5 CNN heat model", CNN_MODEL_SAVE_PATH),
     ("Production priority score", PROCESSED_DIR / "priority_score.csv"),
     ("S6 confidence bands", PROCESSED_DIR / "priority_score_confidence_bands.csv"),
+    ("All-places priority score", PROCESSED_DIR / "priority_score_all_places.csv"),
+    ("All-places confidence bands", PROCESSED_DIR / "priority_score_all_places_confidence_bands.csv"),
 ]
 
 for label, path in checks:
