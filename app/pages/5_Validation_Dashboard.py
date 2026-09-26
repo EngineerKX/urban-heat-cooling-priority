@@ -34,7 +34,7 @@ with st.expander("Week-1 gates (G1–G5)", expanded=True):
         st.dataframe(gates_df, use_container_width=True, hide_index=True)
         st.caption(
             "G5 (labeling agreement) passed with Cohen's kappa = 0.676 (\"substantial agreement\", 20 shared "
-            "points, independently labeled by both team members) — see docs/Progress_Log_2026-08-04_0237.md. "
+            "points, independently labeled by both team members) — see docs/archive/Progress_Log_2026-08-04_0237.md. "
             "Not recomputed live here; validation/input_validation/labeling_agreement.py has no persisted "
             "per-run output file yet."
         )
