@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""RF trial (checkpoint_WorldCover branch): train the Random Forest
+"""RF trial (checkpoint_DynamicWorld branch): train the Random Forest
 land-cover baseline on Dynamic World labels instead of WorldCover, and score
 it against the same 300 hand-labeled validation points -- a direct,
 apples-to-apples check of whether Dynamic World is a better TRAINING label
@@ -45,6 +45,7 @@ from src.landcover.rf_baseline import (
     build_feature_image,
     build_training_region,
     classify,
+    classify_probability,
     export_classified_raster,
     extract_training_samples,
     train_rf_classifier,
@@ -57,12 +58,13 @@ from validation.landcover_validation.classifier_evaluation import (
 
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 RF_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_dw_trial.tif"
+RF_PROB_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_dw_trial_prob.tif"
 EVAL_DIR_DW = PROCESSED_DIR / "landcover" / "evaluation" / "dw_trial"
 CLASSIFIER_ASSET_ID_DW = f"projects/{GEE_PROJECT_ID}/assets/rf_landcover_classifier_dw_trial"
 PRODUCTION_COMPARISON_CSV = PROCESSED_DIR / "landcover" / "evaluation" / "comparison_table.csv"
 
 
-def main(use_asset_cache: bool = False):
+def main(use_asset_cache: bool = False, with_probabilities: bool = False):
     if not VALIDATION_CSV.exists():
         raise FileNotFoundError(f"{VALIDATION_CSV} not found — label the validation sample first.")
 
@@ -86,12 +88,22 @@ def main(use_asset_cache: bool = False):
         feature_image, dw_bucket_image, training_region, class_band="dw_class",
     )
 
+    # --with-probabilities forces a fresh train regardless of use_asset_cache,
+    # same reason as scripts/train_landcover_rf.py: a classifier round-tripped
+    # through Export.classifier.toAsset/ee.Classifier.load() only supports
+    # CLASSIFICATION output mode, not MULTIPROBABILITY.
+    effective_asset_cache = use_asset_cache and not with_probabilities
     classifier = train_rf_classifier(
-        training_fc, use_asset_cache=use_asset_cache, class_band="dw_class", asset_id=CLASSIFIER_ASSET_ID_DW,
+        training_fc, use_asset_cache=effective_asset_cache, class_band="dw_class", asset_id=CLASSIFIER_ASSET_ID_DW,
     )
     classified = classify(feature_image, classifier, boundary)
     export_classified_raster(classified, boundary, out_path=RF_RASTER_PATH_DW)
     print(f"\nDynamic-World-trained RF raster: {RF_RASTER_PATH_DW}")
+
+    if with_probabilities:
+        prob_image = classify_probability(feature_image, classifier, boundary, valid_mask)
+        export_classified_raster(prob_image, boundary, out_path=RF_PROB_RASTER_PATH_DW)
+        print(f"Probability raster (needed for the hybrid rebuild): {RF_PROB_RASTER_PATH_DW}")
 
     # Formal evaluation -- the SAME code path
     # scripts/evaluate_landcover_classifiers.py uses for RF/U-Net/hybrid, so
@@ -117,5 +129,9 @@ if __name__ == "__main__":
              "and reuse it on later runs. Off by default for this trial, so a re-run always retrains "
              "fresh rather than silently reusing a stale asset.",
     )
+    parser.add_argument(
+        "--with-probabilities", action="store_true",
+        help="Also export a per-class probability raster (needed for the hybrid rebuild in step 2).",
+    )
     args = parser.parse_args()
-    main(use_asset_cache=args.use_asset_cache)
+    main(use_asset_cache=args.use_asset_cache, with_probabilities=args.with_probabilities)

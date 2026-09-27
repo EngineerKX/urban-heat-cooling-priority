@@ -47,11 +47,17 @@ _FINGERPRINT_FILENAME = "source_fingerprint.txt"
 N_CLASSES = len(BUCKET_NAMES)
 
 
-def build_training_stack(feature_image, wc_bucket_image, training_region):
+def build_training_stack(feature_image, wc_bucket_image, training_region, class_band: str = "wc_class"):
     """wc_class values are 1-4 (buckets); pixels outside the mask get filled
     with 0 ("no valid label") so the exported patch always has a defined
     value per pixel — the sample-weight mask in `parse_training_patches`
     uses this to exclude those pixels from the loss.
+
+    `class_band` defaults to WorldCover's `wc_class` but accepts any other
+    label source with the same band-per-pixel bucket-id convention (e.g.
+    Dynamic World's `dw_class`, src/ingest/dynamic_world.py, used by the
+    checkpoint_DynamicWorld trial) -- this function doesn't care where the
+    label came from.
 
     `.toFloat()` matters here: GEE's TFRecord patch export encodes each
     band independently based on its own pixel type, and a non-float band
@@ -62,7 +68,7 @@ def build_training_stack(feature_image, wc_bucket_image, training_region):
     stack encoded the same way.
     """
     return (
-        feature_image.addBands(wc_bucket_image.select("wc_class").unmask(0).toFloat())
+        feature_image.addBands(wc_bucket_image.select(class_band).unmask(0).toFloat())
         .clip(training_region)
     )
 
@@ -88,15 +94,27 @@ def _clear_patch_dir(out_dir: Path) -> None:
             f.unlink()
 
 
-def training_fingerprint(validation_csv_path) -> str:
+def training_fingerprint(validation_csv_path, label_source: str = "worldcover") -> str:
     """Hash of the validation CSV's bytes -- changes iff the labels/points
     that define training_region's exclusion zone change. Comparing this
     (not just "do patch files exist") is what lets the cache tell the
     difference between "nothing changed, reuse freely" and "labels
     changed, this cache is now wrong" without relying on a human to
     remember to pass a --force flag. Also used to key the GCS cache
-    prefix, so a relabel correctly triggers a fresh export there too."""
-    return hashlib.sha256(Path(validation_csv_path).read_bytes()).hexdigest()
+    prefix, so a relabel correctly triggers a fresh export there too.
+
+    `label_source` folds the TRAINING LABEL SOURCE into the hash too (e.g.
+    "dynamicworld_<window>" for the checkpoint_DynamicWorld trial). The
+    validation CSV's bytes alone don't change when only the label source
+    changes, and two different label sources trained against the SAME
+    validation CSV would otherwise silently collide on the exact same
+    GCS cache key -- one source's already-exported patches getting reused
+    for the other, with no error. Left at the default "worldcover", the
+    hash is computed exactly as before (no salt appended), so the
+    production pipeline's existing cache is untouched."""
+    base = Path(validation_csv_path).read_bytes()
+    salt = b"" if label_source == "worldcover" else f"|{label_source}".encode()
+    return hashlib.sha256(base + salt).hexdigest()
 
 
 def _cached_fingerprint(out_dir: Path):
@@ -112,7 +130,8 @@ def _write_fingerprint(out_dir: Path, fingerprint: str) -> None:
 
 def export_training_patches(training_stack, training_region, validation_csv_path,
                              patch_size=settings.UNET_PATCH_SIZE, scale=TARGET_SCALE_M, crs=S2_UTM_CRS,
-                             bucket=GEE_EXPORT_BUCKET, force: bool = False, force_export: bool = False):
+                             bucket=GEE_EXPORT_BUCKET, force: bool = False, force_export: bool = False,
+                             label_source: str = "worldcover"):
     """Re-exports automatically whenever validation_csv_path's contents
     have changed since the patches currently on disk were exported
     (fingerprint mismatch) -- so relabeling the validation sample can no
@@ -120,8 +139,12 @@ def export_training_patches(training_stack, training_region, validation_csv_path
     retrain (different hyperparameters, same labels) can reuse the cached
     patches for free instead of re-exporting for no reason. `force=True`
     bypasses the local-disk cache (but still checks GCS first);
-    `force_export=True` bypasses GCS too, forcing a genuine new GEE job."""
-    fingerprint = training_fingerprint(validation_csv_path)
+    `force_export=True` bypasses GCS too, forcing a genuine new GEE job.
+
+    `label_source` (see `training_fingerprint`) keys a differently-labeled
+    `training_stack` (e.g. Dynamic World) to its OWN GCS prefix, distinct
+    from WorldCover's, so the two never collide on the same cached patches."""
+    fingerprint = training_fingerprint(validation_csv_path, label_source)
     cache_valid = _patches_already_downloaded(TRAIN_PATCH_DIR) and _cached_fingerprint(TRAIN_PATCH_DIR) == fingerprint
 
     if not force and cache_valid:
