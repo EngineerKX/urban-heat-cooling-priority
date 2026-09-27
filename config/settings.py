@@ -269,6 +269,17 @@ DW_TO_BUCKET_TO = [
     BUCKET_VEGETATION, BUCKET_BUILTUP, BUCKET_BARE, 0,
 ]
 
+# Training-label window for the Dynamic-World-as-training-labels trial
+# (scripts/train_landcover_rf_dynamicworld.py): the mode class over this whole
+# span, spanning the SAME years as the satellite feature composite (YEARS
+# above) rather than a single snapshot year like WorldCover's -- so a label
+# here reflects "the typical class over the years the model's features are
+# drawn from," which is the fairest comparison against WorldCover's one
+# locked year. Land-cover class isn't seasonally distorted the way LST is
+# (see validation/input_validation/land_change.py), so this uses full years,
+# not DRY_SEASON_MONTHS.
+DW_TRAIN_START, DW_TRAIN_END = f"{YEARS[0]}-01-01", f"{YEARS[-1] + 1}-01-01"
+
 # ---------------------------------------------------------------------------
 # RF / U-Net hyperparameters
 # ---------------------------------------------------------------------------
