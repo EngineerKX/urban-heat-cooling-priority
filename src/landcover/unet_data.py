@@ -225,10 +225,16 @@ def read_raw_patches(patch_dir, bands, patch_size=settings.UNET_PATCH_SIZE) -> n
 def parse_training_patches(patch_dir, patch_size=settings.UNET_PATCH_SIZE,
                             feature_bands=ALL_FEATURE_BANDS, n_classes=N_CLASSES,
                             train_val_split=settings.UNET_TRAIN_VAL_SPLIT, seed=42,
-                            batch_size=settings.UNET_BATCH_SIZE):
+                            batch_size=settings.UNET_BATCH_SIZE, class_band: str = "wc_class"):
+    """`class_band` must match whatever band name `build_training_stack` was
+    given (default "wc_class"; "dw_class" for the checkpoint_DynamicWorld
+    trial, src/ingest/dynamic_world.py) -- it's the literal band name baked
+    into the exported TFRecord patches, not just a label. A mismatch here
+    fails loudly at parse time (TensorFlow's ParseSingleExample can't find
+    the named feature), not silently."""
     import tensorflow as tf
 
-    all_bands = feature_bands + ["wc_class"]
+    all_bands = feature_bands + [class_band]
     raw = read_raw_patches(patch_dir, all_bands, patch_size)  # (n, H, W, len(all_bands))
 
     features = raw[..., : len(feature_bands)]
