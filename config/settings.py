@@ -253,6 +253,23 @@ LC_CHANGE_FRACTION_THRESHOLD = 0.15
 LC_MIN_VALID_PIXELS = 30
 
 # ---------------------------------------------------------------------------
+# Dynamic World vs WorldCover comparison (checkpoint_DynamicWorld)
+# ---------------------------------------------------------------------------
+# Same product on both sides, so differences between products don't count as
+# "change". Windows are 18 months; the baseline is centred on the WorldCover year
+# and its two halves give the noise floor (little real change within 2021).
+DW_BASELINE_START, DW_BASELINE_END = "2020-10-01", "2022-04-01"
+DW_BASELINE_SPLIT = "2021-07-01"
+DW_RECENT_START, DW_RECENT_END = "2025-01-01", "2026-07-01"
+# Dynamic World label -> bucket id: 0 water, 1 trees, 2 grass, 3 flooded vegetation,
+# 4 crops, 5 shrub, 6 built, 7 bare, 8 snow/ice (masked; not in Singapore)
+DW_TO_BUCKET_FROM = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+DW_TO_BUCKET_TO = [
+    BUCKET_WATER, BUCKET_VEGETATION, BUCKET_VEGETATION, BUCKET_VEGETATION, BUCKET_VEGETATION,
+    BUCKET_VEGETATION, BUCKET_BUILTUP, BUCKET_BARE, 0,
+]
+
+# ---------------------------------------------------------------------------
 # RF / U-Net hyperparameters
 # ---------------------------------------------------------------------------
 TRAINING_POINTS_PER_CLASS = 3000
