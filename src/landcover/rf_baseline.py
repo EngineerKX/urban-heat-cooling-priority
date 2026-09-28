@@ -24,6 +24,7 @@ from config.settings import (
     ALL_FEATURE_BANDS,
     GEE_EXPORT_BUCKET,
     GEE_PROJECT_ID,
+    INDEX_BANDS,
     PROCESSED_DIR,
     RF_BAG_FRACTION,
     RF_MIN_LEAF_POPULATION,
@@ -56,6 +57,50 @@ def build_feature_image(sg_bbox, boundary, years, months, cloud_prob_max, crs=S2
     return feature_image, valid_mask
 
 
+def add_neighborhood_texture_bands(feature_image, index_bands=INDEX_BANDS, kernel_radius_px: int = 1,
+                                    crs=S2_UTM_CRS, scale=TARGET_SCALE_M):
+    """RF-only feature-engineering step (checkpoint_DynamicWorld): adds the
+    local mean and standard deviation of each index band over a small fixed
+    neighborhood, as EXTRA input bands -- not a smoothing of the output.
+
+    Why this exists: RF classifies every pixel independently, with no idea
+    what's next to it, unlike U-Net's convolutions. A diagnostic (majority-
+    voting RF's OUTPUT over a spatial window, scored against the 300 hand
+    labels) showed most of RF's accuracy gap vs U-Net closes with just a bit
+    of spatial context. But picking that window's SIZE by testing it against
+    the validation labels would be circular -- so instead of a fixed post-hoc
+    smoothing of predictions (which also erases small features at any window
+    wide enough to help much), this lets the classifier LEARN how much to
+    trust context per class, from a modest, fixed neighborhood decided in
+    advance, not tuned against the eval set.
+
+    `kernel_radius_px=1` (3x3 pixels = 30m at the default 10m grid): the
+    smallest neighborhood beyond the pixel itself, and matching Landsat's own
+    native 30m resolution already used elsewhere in this pipeline (NATIVE_SCALE_M)
+    -- an existing anchor, not a number chosen by sweeping against validation
+    accuracy. Mean captures "what surrounds this pixel"; std captures texture/
+    edges that mean alone can't (a boundary pixel can look locally ambiguous
+    in its mean while still having a distinctive high local spread).
+
+    Explicitly reprojected before reduceNeighborhood, not just inherited from
+    `feature_image` -- same discipline as this project's other neighborhood-
+    scale operations (see src/downscaling/variants.py's reduceResolution
+    comment): don't assume an image's default projection is the one you want
+    a pixel-unit kernel to operate on.
+
+    Applied ONLY to RF's own feature image, never to the shared
+    `build_feature_image()` that U-Net and the CNN heat model also consume --
+    those already get spatial context from their convolutions, and adding
+    these bands there would silently change their input channel count.
+    """
+    indices = feature_image.select(index_bands).reproject(crs=crs, scale=scale)
+    texture = indices.reduceNeighborhood(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
+        kernel=ee.Kernel.square(radius=kernel_radius_px, units="pixels"),
+    )
+    return feature_image.addBands(texture)
+
+
 def build_training_region(boundary, validation_df: pd.DataFrame, buffer_m=VALIDATION_EXCLUSION_BUFFER_M):
     """Singapore boundary minus a buffer around every validation point —
     what makes the no-circularity claim checkable, not just asserted."""
@@ -80,25 +125,30 @@ def build_training_region(boundary, validation_df: pd.DataFrame, buffer_m=VALIDA
 
 def extract_training_samples(
     feature_image, wc_bucket_image, training_region, scale=TARGET_SCALE_M,
-    points_per_class=TRAINING_POINTS_PER_CLASS, seed=42,
+    points_per_class=TRAINING_POINTS_PER_CLASS, seed=42, class_band: str = "wc_class",
 ):
     """Stratified sample, capped per class. Server-side histogram for the
     per-class counts instead of pulling every feature locally — Earth Engine
     caps synchronous FeatureCollection pulls at 5000 elements, and 4 classes
-    x up to `points_per_class` each can exceed that."""
-    training_image = ee.Image.cat([feature_image, wc_bucket_image.select("wc_class")])
+    x up to `points_per_class` each can exceed that.
+
+    `class_band` defaults to WorldCover's `wc_class` but accepts any other
+    label source with the same band-per-pixel bucket-id convention (e.g.
+    Dynamic World's `dw_class`, src/ingest/dynamic_world.py) -- the training
+    logic itself doesn't care where the label came from."""
+    training_image = ee.Image.cat([feature_image, wc_bucket_image.select(class_band)])
     class_values = list(BUCKET_NAMES.keys())
     class_points = [points_per_class] * len(class_values)
 
     training_fc = training_image.stratifiedSample(
-        numPoints=0, classBand="wc_class", region=training_region, scale=scale,
+        numPoints=0, classBand=class_band, region=training_region, scale=scale,
         classValues=class_values, classPoints=class_points, seed=seed,
         geometries=False, dropNulls=True, tileScale=8,
     )
     n_training = training_fc.size().getInfo()
     print(f"Training samples drawn: {n_training} (requested up to {sum(class_points)})")
 
-    train_counts_raw = training_fc.aggregate_histogram("wc_class").getInfo()
+    train_counts_raw = training_fc.aggregate_histogram(class_band).getInfo()
     train_counts = {int(k): v for k, v in train_counts_raw.items()}
     for cls, n in sorted(train_counts.items(), key=lambda kv: -kv[1]):
         print(f"  {cls} {BUCKET_NAMES.get(cls, f'class_{cls}'):<12} {n}")
@@ -116,17 +166,23 @@ def _classifier_asset_exists(asset_id: str) -> bool:
 def train_rf_classifier(
     training_fc, feature_bands=ALL_FEATURE_BANDS, num_trees=RF_NUM_TREES,
     min_leaf_population=RF_MIN_LEAF_POPULATION, bag_fraction=RF_BAG_FRACTION,
-    seed=42, use_asset_cache: bool = True,
+    seed=42, use_asset_cache: bool = True, class_band: str = "wc_class",
+    asset_id: str = RF_CLASSIFIER_ASSET_ID,
 ):
-    """Train (or reload from a GEE asset cache) the RF classifier."""
-    if use_asset_cache and _classifier_asset_exists(RF_CLASSIFIER_ASSET_ID):
-        print(f"Loading cached classifier from asset: {RF_CLASSIFIER_ASSET_ID}")
-        return ee.Classifier.load(RF_CLASSIFIER_ASSET_ID)
+    """Train (or reload from a GEE asset cache) the RF classifier.
+
+    `class_band`/`asset_id` let a caller point this at a differently-labeled
+    `training_fc` (e.g. Dynamic World's `dw_class`, a distinct `asset_id`)
+    without touching the production WorldCover classifier's own cached asset
+    -- see scripts/train_landcover_rf_dynamicworld.py."""
+    if use_asset_cache and _classifier_asset_exists(asset_id):
+        print(f"Loading cached classifier from asset: {asset_id}")
+        return ee.Classifier.load(asset_id)
 
     classifier = ee.Classifier.smileRandomForest(
         numberOfTrees=num_trees, minLeafPopulation=min_leaf_population,
         bagFraction=bag_fraction, seed=seed,
-    ).train(features=training_fc, classProperty="wc_class", inputProperties=feature_bands)
+    ).train(features=training_fc, classProperty=class_band, inputProperties=feature_bands)
 
     schema = classifier.schema().getInfo()
     print(f"RF trained. Input properties: {schema}")
@@ -134,10 +190,10 @@ def train_rf_classifier(
     if use_asset_cache:
         try:
             task = ee.batch.Export.classifier.toAsset(
-                classifier=classifier, description="rf_landcover_classifier", assetId=RF_CLASSIFIER_ASSET_ID,
+                classifier=classifier, description=asset_id.rsplit("/", 1)[-1], assetId=asset_id,
             )
             task.start()
-            print(f"Persisting trained classifier to asset (async): {RF_CLASSIFIER_ASSET_ID}")
+            print(f"Persisting trained classifier to asset (async): {asset_id}")
         except Exception as e:
             print(f"⚠️  Could not export classifier to a GEE asset ({e}) — will retrain next run.")
 
