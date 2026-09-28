@@ -24,6 +24,7 @@ from config.settings import (
     ALL_FEATURE_BANDS,
     GEE_EXPORT_BUCKET,
     GEE_PROJECT_ID,
+    INDEX_BANDS,
     PROCESSED_DIR,
     RF_BAG_FRACTION,
     RF_MIN_LEAF_POPULATION,
@@ -54,6 +55,50 @@ def build_feature_image(sg_bbox, boundary, years, months, cloud_prob_max, crs=S2
     feature_image = with_indices.select(ALL_FEATURE_BANDS)
     valid_mask = feature_image.select("B4").mask()
     return feature_image, valid_mask
+
+
+def add_neighborhood_texture_bands(feature_image, index_bands=INDEX_BANDS, kernel_radius_px: int = 1,
+                                    crs=S2_UTM_CRS, scale=TARGET_SCALE_M):
+    """RF-only feature-engineering step (checkpoint_DynamicWorld): adds the
+    local mean and standard deviation of each index band over a small fixed
+    neighborhood, as EXTRA input bands -- not a smoothing of the output.
+
+    Why this exists: RF classifies every pixel independently, with no idea
+    what's next to it, unlike U-Net's convolutions. A diagnostic (majority-
+    voting RF's OUTPUT over a spatial window, scored against the 300 hand
+    labels) showed most of RF's accuracy gap vs U-Net closes with just a bit
+    of spatial context. But picking that window's SIZE by testing it against
+    the validation labels would be circular -- so instead of a fixed post-hoc
+    smoothing of predictions (which also erases small features at any window
+    wide enough to help much), this lets the classifier LEARN how much to
+    trust context per class, from a modest, fixed neighborhood decided in
+    advance, not tuned against the eval set.
+
+    `kernel_radius_px=1` (3x3 pixels = 30m at the default 10m grid): the
+    smallest neighborhood beyond the pixel itself, and matching Landsat's own
+    native 30m resolution already used elsewhere in this pipeline (NATIVE_SCALE_M)
+    -- an existing anchor, not a number chosen by sweeping against validation
+    accuracy. Mean captures "what surrounds this pixel"; std captures texture/
+    edges that mean alone can't (a boundary pixel can look locally ambiguous
+    in its mean while still having a distinctive high local spread).
+
+    Explicitly reprojected before reduceNeighborhood, not just inherited from
+    `feature_image` -- same discipline as this project's other neighborhood-
+    scale operations (see src/downscaling/variants.py's reduceResolution
+    comment): don't assume an image's default projection is the one you want
+    a pixel-unit kernel to operate on.
+
+    Applied ONLY to RF's own feature image, never to the shared
+    `build_feature_image()` that U-Net and the CNN heat model also consume --
+    those already get spatial context from their convolutions, and adding
+    these bands there would silently change their input channel count.
+    """
+    indices = feature_image.select(index_bands).reproject(crs=crs, scale=scale)
+    texture = indices.reduceNeighborhood(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
+        kernel=ee.Kernel.square(radius=kernel_radius_px, units="pixels"),
+    )
+    return feature_image.addBands(texture)
 
 
 def build_training_region(boundary, validation_df: pd.DataFrame, buffer_m=VALIDATION_EXCLUSION_BUFFER_M):

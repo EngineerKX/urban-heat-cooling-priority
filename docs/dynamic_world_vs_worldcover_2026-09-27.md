@@ -1,8 +1,10 @@
 # Dynamic World vs WorldCover — checkpoint notes (2026-09-27)
 
-Branch: `snapshot/checkpoint_DynamicWorld`. This is a checkpoint taken **before**
-any decision to retrain the land-cover models on Dynamic World labels. Nothing
-about the trained models or the priority score changed on this branch.
+Branch: `checkpoint_WorldCover` (this map-level comparison; the later retrain
+of RF/U-Net/hybrid on Dynamic World labels lives on `checkpoint_DynamicWorld`,
+branched off this commit). This is a checkpoint taken **before** any decision
+to retrain the land-cover models on Dynamic World labels. Nothing about the
+trained models or the priority score changed on this branch.
 
 ## Why this exists
 
