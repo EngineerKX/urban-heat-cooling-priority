@@ -2,7 +2,8 @@
 """Land-cover classifier swap: rerun the priority score with the greenery
 fraction taken from each classifier's raster (RF, U-Net, hybrid) and from the
 NDVI-threshold proxy, everything else held fixed, and count how many of the
-top-20 subzones change versus the production (hybrid) score. This is the
+top-20 subzones change versus the production score (the reference is the
+production land-cover model, config.settings.LANDCOVER_PRODUCTION_MODEL). This is the
 decision-level counterpart to the accuracy/F1 evaluation in
 scripts/evaluate_landcover_classifiers.py -- see
 validation/score_validation/landcover_impact.py for what it can and can't say.
@@ -20,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.settings import PROCESSED_DIR, SUBZONE_ID_PROPERTY, UNET_CLASSIFIED_RASTER_PATH
+from config.settings import LANDCOVER_PRODUCTION_MODEL, PROCESSED_DIR, SUBZONE_ID_PROPERTY, UNET_CLASSIFIED_RASTER_PATH
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.landcover.rf_baseline import RF_RASTER_PATH
@@ -31,7 +32,9 @@ from validation.score_validation.landcover_impact import run_landcover_swap
 
 OUT_PATH = PROCESSED_DIR / "landcover_swap_comparison.csv"
 RASTERS = {"RF": RF_RASTER_PATH, "U-Net": UNET_CLASSIFIED_RASTER_PATH, "hybrid": HYBRID_RASTER_PATH}
-REFERENCE_LABEL = "hybrid"
+# Row labels here vs. the LANDCOVER_PRODUCTION_MODEL keys in config.settings.
+MODEL_LABELS = {"rf": "RF", "unet": "U-Net", "hybrid": "hybrid"}
+REFERENCE_LABEL = MODEL_LABELS[LANDCOVER_PRODUCTION_MODEL]
 
 
 def main(force: bool = False):
@@ -62,15 +65,15 @@ def main(force: bool = False):
         greenery_columns["NDVI-threshold proxy"] = "greenery_fraction_ndvi"
 
     # The reference row should reproduce the production score. If the adaptive-capacity
-    # pillar was built from an older hybrid raster it won't -- say so instead of comparing silently.
+    # pillar was built from an older land-cover raster it won't -- say so instead of comparing silently.
     if "greenery_fraction_landcover" in df.columns:
-        gap = float((df["greenery_hybrid"] - df["greenery_fraction_landcover"]).abs().max())
+        gap = float((df[greenery_columns[REFERENCE_LABEL]] - df["greenery_fraction_landcover"]).abs().max())
         if gap > 1e-6:
-            print(f"\n⚠️  The adaptive-capacity pillar's land-cover greenery differs from the current hybrid raster "
+            print(f"\n⚠️  The adaptive-capacity pillar's land-cover greenery differs from the current production land-cover raster "
                   f"(max gap {gap:.3f}) — rebuild it with scripts/build_adaptive_capacity_pillar.py --force, or the "
                   f"reference row here won't match the production score.")
 
-    print("\n=== Priority score under each greenery source (reference: hybrid) ===")
+    print(f"\n=== Priority score under each greenery source (reference: {REFERENCE_LABEL}) ===")
     result = run_landcover_swap(df, greenery_columns, reference_label=REFERENCE_LABEL)
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

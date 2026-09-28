@@ -25,6 +25,7 @@ import pickle
 import streamlit as st
 
 from config.settings import (
+    LANDCOVER_RASTER_PATH,
     CNN_MODEL_SAVE_PATH,
     INTERIM_DIR,
     PROCESSED_DIR,
@@ -47,7 +48,6 @@ XGB_MODEL_PATH = PROCESSED_DIR / "heat_model" / "xgb_model.pkl"
 
 CNN_INFERENCE_PATCH_DIR = INTERIM_DIR / "unet_patches" / "inference"
 CNN_MIXER_JSON_PATH = CNN_INFERENCE_PATCH_DIR / "unet_inference.json"
-HYBRID_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"
 LST_BICUBIC10_PATH = INTERIM_DIR / "lst_bicubic10_full.tif"
 
 st.subheader("Subzone-level (XGBoost) — live")
@@ -102,7 +102,7 @@ st.subheader("Patch-level (CNN) — live")
 
 cnn_available = (
     CNN_MODEL_SAVE_PATH.exists() and CNN_MIXER_JSON_PATH.exists()
-    and HYBRID_RASTER_PATH.exists() and LST_BICUBIC10_PATH.exists()
+    and LANDCOVER_RASTER_PATH.exists() and LST_BICUBIC10_PATH.exists()
 )
 
 if not cnn_available:
@@ -124,7 +124,7 @@ else:
         each -- a real one-time cost (tens of seconds), so cached per session
         rather than re-run on every slider move."""
         X, _y, valid_mask = build_local_feature_target_patches(
-            CNN_INFERENCE_PATCH_DIR, CNN_MIXER_JSON_PATH, HYBRID_RASTER_PATH, LST_BICUBIC10_PATH,
+            CNN_INFERENCE_PATCH_DIR, CNN_MIXER_JSON_PATH, LANDCOVER_RASTER_PATH, LST_BICUBIC10_PATH,
         )
         class_means = class_mean_feature_vectors(X, valid_mask=valid_mask)
         model = load_cnn_regressor(CNN_MODEL_SAVE_PATH)

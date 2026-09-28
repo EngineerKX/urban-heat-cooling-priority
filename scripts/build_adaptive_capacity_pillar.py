@@ -25,6 +25,8 @@ from config.settings import (
     ADAPTIVE_CAPACITY_SOURCE,
     DRY_SEASON_MONTHS,
     INTERIM_DIR,
+    LANDCOVER_PRODUCTION_MODEL,
+    LANDCOVER_RASTER_PATH,
     NDVI_VEGETATION_THRESHOLD,
     S2_CLOUD_PROB_MAX,
     SG_BBOX,
@@ -34,7 +36,6 @@ from config.settings import (
 )
 from src.ingest.gee import init_ee
 from src.ingest.subzones import as_ee_feature_collection, as_geodataframe, fetch_subzones_geojson
-from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.priority_score.pillars import build_adaptive_capacity_pillar, build_adaptive_capacity_pillar_landcover
 
 HEAT_CSV_PATH = INTERIM_DIR / "heat_variants_subzone.csv"
@@ -61,15 +62,15 @@ def main(force: bool = False):
     ).rename(columns={"greenery_fraction": "greenery_fraction_ndvi"})
 
     landcover_col = None
-    if HYBRID_RASTER_PATH.exists():
-        print("\n--- Land-cover-hybrid greenery fraction ---")
+    if LANDCOVER_RASTER_PATH.exists():
+        print(f"\n--- Land-cover greenery fraction ({LANDCOVER_PRODUCTION_MODEL} map) ---")
         subzones_gdf = as_geodataframe(geojson)
         landcover_df = build_adaptive_capacity_pillar_landcover(
             subzones_gdf, SUBZONE_ID_PROPERTY, heat_ids,
         ).rename(columns={"greenery_fraction": "greenery_fraction_landcover"})
         landcover_col = "greenery_fraction_landcover"
     else:
-        print(f"\n⚠️  {HYBRID_RASTER_PATH} not found — run scripts/build_landcover_hybrid.py first. "
+        print(f"\n⚠️  {LANDCOVER_RASTER_PATH} not found — build the production land-cover map first. "
               f"Falling back to NDVI regardless of ADAPTIVE_CAPACITY_SOURCE.")
         landcover_df = None
 

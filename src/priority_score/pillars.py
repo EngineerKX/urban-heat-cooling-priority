@@ -19,6 +19,7 @@ import pandas as pd
 
 from config.settings import (
     ELDERLY_AGE_COLUMNS,
+    LANDCOVER_RASTER_PATH,
     MIN_RESIDENTS_FOR_RANKING,
     NDVI_VEGETATION_THRESHOLD,
     S2_UTM_CRS,
@@ -31,7 +32,6 @@ from config.settings import (
 )
 from src.ingest.gee import add_spectral_indices, fetch_sentinel2_collection
 from src.ingest.singstat import fetch_population_by_subzone
-from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.landcover.zonal import zonal_class_fractions
 from src.utils.geo import normalize, zonal_mean
 
@@ -182,16 +182,17 @@ def build_adaptive_capacity_pillar(
     return ac_df[ac_df["subzone_id"].astype(str).isin(heat_ids)].copy()
 
 
-# --- Adaptive-capacity pillar (real S3 land-cover hybrid) -----------------
+# --- Adaptive-capacity pillar (real S3 land-cover map) --------------------
 
 def build_adaptive_capacity_pillar_landcover(
     subzones_gdf: gpd.GeoDataFrame,
     id_property: str,
     heat_subzone_ids: pd.Series,
-    raster_path=HYBRID_RASTER_PATH,
+    raster_path=LANDCOVER_RASTER_PATH,
 ) -> pd.DataFrame:
-    """Returns [subzone_id, greenery_fraction] using the validated RF/U-Net
-    hybrid's vegetation fraction per subzone -- the real S3 output that
+    """Returns [subzone_id, greenery_fraction] using the production land-cover
+    map's vegetation fraction per subzone (config.settings.LANDCOVER_RASTER_PATH;
+    U-Net on Dynamic World labels since 2026-09-29) -- the real S3 output that
     build_adaptive_capacity_pillar's NDVI threshold was always described as
     "standing in" for. That NDVI-based function is left untouched so both
     remain callable for comparison (see ADAPTIVE_CAPACITY_SOURCE and

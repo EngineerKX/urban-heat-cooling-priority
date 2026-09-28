@@ -25,6 +25,7 @@ from config.settings import (
     GEE_EXPORT_BUCKET,
     GEE_PROJECT_ID,
     INDEX_BANDS,
+    LANDCOVER_RASTER_PATHS,
     PROCESSED_DIR,
     RF_BAG_FRACTION,
     RF_MIN_LEAF_POPULATION,
@@ -39,7 +40,7 @@ from src.ingest.gee import add_spectral_indices, export_geotiff_to_gcs, fetch_se
 from src.ingest.worldcover import BUCKET_NAMES, get_worldcover_bucket_image
 
 RF_CLASSIFIER_ASSET_ID = f"projects/{GEE_PROJECT_ID}/assets/rf_landcover_classifier"
-RF_RASTER_PATH = PROCESSED_DIR / "landcover" / "rf_landcover.tif"
+RF_RASTER_PATH = LANDCOVER_RASTER_PATHS["rf"]
 RF_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "rf_landcover_prob.tif"
 
 

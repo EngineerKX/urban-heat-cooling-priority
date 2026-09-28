@@ -9,9 +9,12 @@ already anticipated by `.env.example` (`GEE_SERVICE_ACCOUNT` /
 `GEE_PRIVATE_KEY_PATH`).
 """
 
+from datetime import date
+
 import ee
 
 from config.settings import (
+    DATA_END_DATE,
     GEE_PRIVATE_KEY_PATH,
     GEE_PROJECT_ID,
     GEE_SERVICE_ACCOUNT,
@@ -41,16 +44,28 @@ def init_ee(force: bool = False) -> None:
     print(f"EE initialized OK (service account), project: {GEE_PROJECT_ID}")
 
 
-def date_filter_for_years_months(collection, years, months):
+def date_filter_for_years_months(collection, years, months, end_date: str | None = DATA_END_DATE):
     """Union filter: keep images that fall in ANY (year, month) combo — used
     to build season-controlled, multi-year composites (C4). A plain
-    filterDate(start, end) would mix wet/dry-season conditions."""
+    filterDate(start, end) would mix wet/dry-season conditions.
+
+    `end_date` (exclusive, default config.settings.DATA_END_DATE) caps every
+    combo so imagery released later can't change a composite between runs --
+    months starting on/after it are dropped, and a month straddling it is cut
+    at it. Pass None only to deliberately use every available image."""
+    cap = date.fromisoformat(end_date) if end_date else None
     filters = []
     for y in years:
         for m in months:
-            start = ee.Date.fromYMD(y, m, 1)
-            end = start.advance(1, "month")
-            filters.append(ee.Filter.date(start, end))
+            month_start = date(y, m, 1)
+            if cap and month_start >= cap:
+                continue
+            month_end = date(y + (m == 12), m % 12 + 1, 1)
+            if cap and month_end > cap:
+                month_end = cap
+            filters.append(ee.Filter.date(month_start.isoformat(), month_end.isoformat()))
+    if not filters:
+        raise ValueError(f"No (year, month) combination falls before end_date={end_date}.")
     return collection.filter(ee.Filter.Or(*filters))
 
 

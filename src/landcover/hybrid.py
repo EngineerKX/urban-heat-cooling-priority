@@ -24,10 +24,10 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 
-from config.settings import PROCESSED_DIR
+from config.settings import LANDCOVER_RASTER_PATHS, PROCESSED_DIR
 from src.ingest.worldcover import BUCKET_NAMES
 
-HYBRID_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"
+HYBRID_RASTER_PATH = LANDCOVER_RASTER_PATHS["hybrid"]
 HYBRID_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "hybrid_landcover_prob.tif"
 
 N_CLASSES = len(BUCKET_NAMES)

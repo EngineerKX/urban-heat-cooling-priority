@@ -2,6 +2,13 @@
 """Train the Random Forest land-cover baseline and classify all of
 Singapore. Replaces train_rf_baseline.ipynb (Track B / RF1).
 
+Training labels follow config.settings.LANDCOVER_LABEL_SOURCE (Dynamic World
+since 2026-09-29; WorldCover is the comparison). The optional GEE classifier
+cache is keyed on the label source AND the validation points the training
+region excludes (src/landcover/labels.py::rf_classifier_asset_name), so a
+classifier trained on different labels or a different validation sample is
+never reused.
+
 NOT included here: the formal RF-vs-U-Net-vs-hybrid evaluation (confusion
 matrix, per-class F1) — that runs once all three exist, scored identically.
 
@@ -20,6 +27,7 @@ import pandas as pd
 
 from config.settings import (
     DRY_SEASON_MONTHS,
+    GEE_PROJECT_ID,
     INTERIM_DIR,
     RF_BAG_FRACTION,
     RF_MIN_LEAF_POPULATION,
@@ -34,7 +42,7 @@ from config.settings import (
 )
 from src.ingest.gee import init_ee
 from src.ingest.subzones import as_ee_feature_collection, dissolve_boundary, fetch_subzones_geojson
-from src.ingest.worldcover import get_worldcover_bucket_image
+from src.landcover.labels import get_training_label_image, label_source_tag, rf_classifier_asset_name
 from src.landcover.rf_baseline import (
     RF_PROB_RASTER_PATH,
     RF_RASTER_PATH,
@@ -65,13 +73,14 @@ def main(use_asset_cache: bool = True, with_probabilities: bool = False):
     boundary = dissolve_boundary(subzones_fc)
 
     feature_image, valid_mask = build_feature_image(sg_bbox, boundary, YEARS, DRY_SEASON_MONTHS, S2_CLOUD_PROB_MAX)
-    wc_bucket_image = get_worldcover_bucket_image(boundary, S2_UTM_CRS, TARGET_SCALE_M, valid_mask=valid_mask)
+    label_image, class_band = get_training_label_image(boundary, S2_UTM_CRS, TARGET_SCALE_M, valid_mask=valid_mask)
 
     validation_df = pd.read_csv(VALIDATION_CSV)
     print(f"Loaded {len(validation_df)} validation points from {VALIDATION_CSV}")
 
     training_region, _ = build_training_region(boundary, validation_df)
-    training_fc, _ = extract_training_samples(feature_image, wc_bucket_image, training_region)
+    training_fc, _ = extract_training_samples(feature_image, label_image, training_region, class_band=class_band)
+    asset_id = f"projects/{GEE_PROJECT_ID}/assets/{rf_classifier_asset_name(VALIDATION_CSV)}"
 
     with start_run("rf"):
         mlflow.log_params({
@@ -83,6 +92,8 @@ def main(use_asset_cache: bool = True, with_probabilities: bool = False):
             "n_validation_points": len(validation_df),
             "use_asset_cache": use_asset_cache,
             "with_probabilities": with_probabilities,
+            "label_source": label_source_tag(),
+            "classifier_asset": asset_id,
         })
 
         # GEE constraint discovered empirically (not documented anywhere): a
@@ -99,7 +110,9 @@ def main(use_asset_cache: bool = True, with_probabilities: bool = False):
         if with_probabilities and use_asset_cache:
             print("--with-probabilities forces a fresh classifier train (asset-cached "
                   "classifiers don't support MULTIPROBABILITY output mode).")
-        classifier = train_rf_classifier(training_fc, use_asset_cache=effective_asset_cache)
+        classifier = train_rf_classifier(
+            training_fc, use_asset_cache=effective_asset_cache, class_band=class_band, asset_id=asset_id,
+        )
         classified = classify(feature_image, classifier, boundary)
 
         accuracy, crosstab = informal_accuracy_check(classified, validation_df)

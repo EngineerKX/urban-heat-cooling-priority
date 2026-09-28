@@ -101,6 +101,16 @@ DRY_SEASON_MONTHS = [4, 5, 10, 11]
 # needed.
 WET_SEASON_MONTHS = [12, 1, 2]
 
+# Fixed (exclusive) end date for every satellite composite and the Dynamic
+# World training labels. YEARS runs to 2026, so without a cap each new month
+# of imagery (e.g. Oct-Nov 2026 dry season, Dec 2026 wet season) would
+# silently change every composite, and Dynamic World labels would change with
+# every newly released image -- runs could not be reproduced. Applied in
+# src/ingest/gee.py::date_filter_for_years_months, the single choke point all
+# Landsat / Sentinel-2 / MODIS composites go through. "2026-07-01" keeps
+# everything through June 2026; the last dry-season data in use is May 2026.
+DATA_END_DATE = "2026-07-01"
+
 LANDSAT_CLOUD_COVER_MAX = 70  # scene-metadata prefilter (locked Week-1 gate value)
 S2_CLOUD_PROB_MAX = 70  # s2cloudless per-pixel probability threshold (see drift note above)
 
@@ -118,8 +128,19 @@ SUBZONE_DATASET_ID = "d_8594ae9ff96d0c708bc2af633048edfb"  # MP19 Subzone Bounda
 SUBZONE_ID_PROPERTY = "SUBZONE_N"
 
 # ---------------------------------------------------------------------------
-# WorldCover (training labels only — never the validation answer key)
+# Land-cover training labels
 # ---------------------------------------------------------------------------
+# Which product the land-cover classifiers learn from: "dynamicworld" (the
+# production choice since 2026-09-29) or "worldcover" (the original source,
+# kept as the comparison). Neither is ever the validation answer key -- that is
+# the 300 hand-labelled points. Dynamic World agreed with those points far
+# better (area-weighted 81.9% vs 69.5%) and retraining on it lifted every
+# model significantly; see docs/dynamic_world_vs_worldcover_2026-09-27.md and
+# the MLflow batch dynamicworld_eval_2026-09-29b. Resolved to a label image by
+# src/landcover/labels.py.
+LANDCOVER_LABEL_SOURCE = "dynamicworld"
+
+# WorldCover (training labels when LANDCOVER_LABEL_SOURCE = "worldcover")
 WORLDCOVER_ASSET = "ESA/WorldCover/v200/2021"
 
 WC_TREE, WC_SHRUB, WC_GRASS, WC_CROP = 10, 20, 30, 40
@@ -269,16 +290,16 @@ DW_TO_BUCKET_TO = [
     BUCKET_VEGETATION, BUCKET_BUILTUP, BUCKET_BARE, 0,
 ]
 
-# Training-label window for the Dynamic-World-as-training-labels trial
-# (scripts/train_landcover_rf_dynamicworld.py): the mode class over this whole
-# span, spanning the SAME years as the satellite feature composite (YEARS
-# above) rather than a single snapshot year like WorldCover's -- so a label
-# here reflects "the typical class over the years the model's features are
-# drawn from," which is the fairest comparison against WorldCover's one
-# locked year. Land-cover class isn't seasonally distorted the way LST is
-# (see validation/input_validation/land_change.py), so this uses full years,
-# not DRY_SEASON_MONTHS.
-DW_TRAIN_START, DW_TRAIN_END = f"{YEARS[0]}-01-01", f"{YEARS[-1] + 1}-01-01"
+# Dynamic World training-label window: the mode class over this whole span,
+# covering the SAME period as the satellite feature composite (YEARS, capped
+# at DATA_END_DATE) rather than a single snapshot year like WorldCover's -- so
+# a label reflects "the typical class over the period the model's features are
+# drawn from". Land-cover class isn't seasonally distorted the way LST is (see
+# validation/input_validation/land_change.py), so this uses full years, not
+# DRY_SEASON_MONTHS. The end is fixed (DATA_END_DATE) so newly released images
+# can't change the labels between runs. (The 2026-09-27/28 trial models used
+# an open end of 2027-01-01, i.e. every image up to the day they were trained.)
+DW_TRAIN_START, DW_TRAIN_END = f"{YEARS[0]}-01-01", DATA_END_DATE
 
 # ---------------------------------------------------------------------------
 # RF / U-Net hyperparameters
@@ -305,6 +326,24 @@ UNET_CLASSIFIED_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover.tif"
 UNET_PROB_RASTER_PATH = PROCESSED_DIR / "landcover" / "unet_landcover_prob.tif"
 UNET_TRAIN_PATCH_DIR = INTERIM_DIR / "unet_patches" / "train"
 UNET_INFERENCE_PATCH_DIR = INTERIM_DIR / "unet_patches" / "inference"
+
+# The production land-cover map: the ONE raster every downstream consumer
+# reads (greenery pillar, hotspot land-cover fractions -> XGBoost features,
+# the CNN heat model's land-cover input channels, the counterfactual tool).
+# "unet" since 2026-09-29: on Dynamic World labels it scored highest (83.1%
+# accuracy, macro F1 0.774); the RF+U-Net hybrid (81.8%) and RF (72.6%) remain
+# as reported comparisons. The U-Net-vs-hybrid gap is within noise (McNemar
+# p=0.29) and swapping them moves 1 of the top-20 subzones.
+LANDCOVER_DIR = PROCESSED_DIR / "landcover"
+LANDCOVER_PRODUCTION_MODEL = "unet"
+LANDCOVER_RASTER_PATHS = {
+    "rf": LANDCOVER_DIR / "rf_landcover.tif",
+    "unet": UNET_CLASSIFIED_RASTER_PATH,
+    "hybrid": LANDCOVER_DIR / "hybrid_landcover.tif",
+}
+if LANDCOVER_PRODUCTION_MODEL not in LANDCOVER_RASTER_PATHS:
+    raise ValueError(f"LANDCOVER_PRODUCTION_MODEL must be one of {sorted(LANDCOVER_RASTER_PATHS)}.")
+LANDCOVER_RASTER_PATH = LANDCOVER_RASTER_PATHS[LANDCOVER_PRODUCTION_MODEL]
 
 # GCS prefixes: models/ mirrors MODELS_DIR (trained weights, source of
 # truth after Colab training); unet_train_patches/ and
@@ -344,6 +383,10 @@ CNN_MODEL_GCS_PREFIX = "models/heat_cnn"
 # U-Net inference + RF combined via build_landcover_hybrid.py) — pushed
 # manually after a local hybrid build, pulled by the CNN Colab notebook.
 HYBRID_RASTER_GCS_PREFIX = "training_inputs/hybrid_raster"
+# Where the production land-cover map (LANDCOVER_RASTER_PATH) is pushed for the
+# CNN Colab notebook, which can't regenerate it. Separate from the hybrid
+# prefix above so the old hybrid upload can't be picked up by mistake.
+LANDCOVER_RASTER_GCS_PREFIX = "training_inputs/landcover_raster"
 
 # The hand-labeled validation sample also can't be regenerated in Colab (it
 # requires the Streamlit labeling app, a human, and the joint-labeling

@@ -26,6 +26,7 @@ import mlflow
 from config.settings import (
     DRY_SEASON_MONTHS,
     INTERIM_DIR,
+    LANDCOVER_RASTER_PATH,
     LANDSAT_CLOUD_COVER_MAX,
     NATIVE_SCALE_M,
     PROCESSED_DIR,
@@ -51,7 +52,6 @@ from src.hotspots.cluster import (
 from src.hotspots.features import build_seasonal_feature_table
 from src.ingest.gee import init_ee
 from src.ingest.subzones import as_ee_feature_collection, as_geodataframe, fetch_subzones_geojson
-from src.landcover.hybrid import HYBRID_RASTER_PATH
 from src.landcover.zonal import zonal_class_fractions
 from src.utils.caching import load_or_fetch_csv
 from src.utils.experiment_tracking import HOTSPOTS_EXPERIMENT_NAME, start_run
@@ -141,16 +141,16 @@ def main(force: bool = False):
 
     landcover_cols = []
     coherence_result = None
-    if HYBRID_RASTER_PATH.exists():
+    if LANDCOVER_RASTER_PATH.exists():
         print("\n--- Land-cover coherence check (fractions are NOT a clustering input) ---")
         subzones_gdf = as_geodataframe(geojson)
-        frac_df = zonal_class_fractions(HYBRID_RASTER_PATH, subzones_gdf, SUBZONE_ID_PROPERTY)
+        frac_df = zonal_class_fractions(LANDCOVER_RASTER_PATH, subzones_gdf, SUBZONE_ID_PROPERTY)
         result_df = result_df.merge(frac_df.drop(columns="n_valid_pixels"), on="subzone_id", how="left")
         landcover_cols = [c for c in frac_df.columns if c.startswith("fraction_")]
         coherence_result = sanity_check_landcover_coherence(result_df, "primary_cluster")
     else:
-        print(f"\n⚠️  {HYBRID_RASTER_PATH} not found — skipping land-cover coherence check "
-              f"(run scripts/build_landcover_hybrid.py first).")
+        print(f"\n⚠️  {LANDCOVER_RASTER_PATH} not found — skipping land-cover coherence check "
+              f"(build the production land-cover map first).")
 
     with start_run("primary_cluster", experiment_name=HOTSPOTS_EXPERIMENT_NAME, stage="selection"):
         mlflow.log_param("primary_cluster_method", result_df["primary_cluster_method"].iloc[0])

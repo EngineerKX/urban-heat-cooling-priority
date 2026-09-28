@@ -13,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import streamlit as st
 
-from config.settings import CNN_MODEL_SAVE_PATH, INTERIM_DIR, PROCESSED_DIR
+from config.settings import (
+    CNN_MODEL_SAVE_PATH, INTERIM_DIR, LANDCOVER_PRODUCTION_MODEL, LANDCOVER_RASTER_PATH, PROCESSED_DIR,
+)
 
 st.set_page_config(page_title="Urban Heat & Cooling-Priority Mapping", page_icon="🌡️", layout="wide")
 
@@ -48,6 +50,7 @@ checks = [
     ("RF land cover raster", PROCESSED_DIR / "landcover" / "rf_landcover.tif"),
     ("U-Net land cover raster", PROCESSED_DIR / "landcover" / "unet_landcover.tif"),
     ("Land-cover hybrid raster", PROCESSED_DIR / "landcover" / "hybrid_landcover.tif"),
+    (f"Production land-cover map ({LANDCOVER_PRODUCTION_MODEL})", LANDCOVER_RASTER_PATH),
     ("S4 hotspot clusters", PROCESSED_DIR / "hotspot_clusters.csv"),
     ("S5 XGBoost heat model", PROCESSED_DIR / "heat_model" / "xgb_model.pkl"),
     ("S5 CNN heat model", CNN_MODEL_SAVE_PATH),
