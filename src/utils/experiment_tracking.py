@@ -37,13 +37,15 @@ _IMPORTED_RUNS_MANIFEST = REPO_ROOT / "mlflow_imported_runs.txt"
 mlflow.set_tracking_uri(f"sqlite:///{(REPO_ROOT / 'mlflow.db').as_posix()}")
 
 
-def start_run(model_name: str, experiment_name: str = EXPERIMENT_NAME, **tags):
+def start_run(model_name: str, experiment_name: str = EXPERIMENT_NAME, nested: bool = False, **tags):
     """`experiment_name` defaults to EXPERIMENT_NAME so every existing call
     site (scripts/train_landcover_rf.py, notebooks/colab_training/train_unet.ipynb)
     is unaffected. S5's training code passes HEAT_MODEL_EXPERIMENT_NAME
-    explicitly instead of this module growing a second hardcoded default."""
+    explicitly instead of this module growing a second hardcoded default.
+    `nested=True` opens the run as a child of the currently active run (used
+    by scripts/log_landcover_evaluation_mlflow.py to group its runs)."""
     mlflow.set_experiment(experiment_name)
-    return mlflow.start_run(run_name=model_name, tags={"model_type": model_name, **tags})
+    return mlflow.start_run(run_name=model_name, nested=nested, tags={"model_type": model_name, **tags})
 
 
 def log_artifact_safe(local_path) -> None:
