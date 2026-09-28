@@ -14,15 +14,23 @@ model, grouped under a single parent run so they sit together in the UI:
   worldcover_baseline
                  The WorldCover-trained RF, U-Net and hybrid, for comparison.
 
-Every run is scored by the same code (validation/landcover_validation/
-classifier_evaluation.py) against the same 300 hand-labelled points, and gets
-accuracy, macro/weighted F1, per-class F1 and n_scored as metrics, plus its
-confusion matrix and per-class table as artifacts.
+Every model here was trained with the 15 m exclusion buffer around the SAME
+300 validation points it is scored on (tag `trained_n_validation_points`).
+The production WorldCover RF was trained against an older 200-point sample,
+so the WorldCover RF and hybrid baselines come from a retrain against the 300
+(scripts/train_landcover_rf_worldcover_baseline.py), not the production files.
 
-Nothing is retrained: every raster already exists (the blend-weight and
-diagnostic-window rasters are rebuilt locally from existing ones into a temp
-folder). Re-running is skipped if this batch is already logged; pass --force
-to log it again.
+Every run is scored by the same code (validation/landcover_validation/
+classifier_evaluation.py) and gets accuracy with a 95% bootstrap interval,
+macro/weighted F1, per-class F1/recall and n_scored, plus its confusion matrix
+and per-class table. The parent run holds a summary table and paired McNemar
+tests for the key comparisons, so it is clear which differences are real and
+which are within noise.
+
+Nothing is retrained here: every raster already exists (blend-weight and
+diagnostic-window rasters are rebuilt locally from existing ones in a temp
+folder). Re-running is skipped if this batch is already logged (--force logs
+it again). Earlier batches are tagged `superseded`, never deleted.
 
 Usage: python scripts/log_landcover_evaluation_mlflow.py [--force]
 Browse: mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -31,6 +39,7 @@ Browse: mlflow ui --backend-store-uri sqlite:///mlflow.db
 import argparse
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -39,44 +48,74 @@ import mlflow
 import numpy as np
 import pandas as pd
 import rasterio
+from scipy.stats import binomtest
 
-from config.settings import INTERIM_DIR, PROCESSED_DIR
+from config.settings import INTERIM_DIR, PROCESSED_DIR, RANDOM_SEED
 from src.ingest.worldcover import BUCKET_NAMES
 from src.landcover.hybrid import load_prob_raster
 from src.landcover.spatial_smoothing import majority_smooth
 from src.utils.experiment_tracking import EXPERIMENT_NAME, log_artifact_safe, start_run
-from validation.landcover_validation.classifier_evaluation import evaluate_classifier
+from validation.landcover_validation.classifier_evaluation import evaluate_classifier, sample_raster_at_points
 
-BATCH = "dynamicworld_eval_2026-09-29"
+BATCH = "dynamicworld_eval_2026-09-29b"
+SUPERSEDED_BATCHES = {
+    "dynamicworld_eval_2026-09-29": "WorldCover RF/hybrid baselines used a model trained against the old "
+                                    "200-point validation sample; replaced by a retrain against the current 300.",
+}
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 LC = PROCESSED_DIR / "landcover"
 
 DIAGNOSTIC_WINDOWS = [5, 7, 11, 21]
 BLEND_UNET_WEIGHTS = [0.9, 0.8, 0.7, 0.6]  # 0.5 is the standard hybrid, logged separately
+N_BOOT = 4000
 
-# (run name, group, raster, tags). Tags say what the run is and whether it was chosen.
+_TRAIN_300 = {"trained_n_validation_points": "300"}
+# (run name, group, raster, tags). Tags say what the run is, where it came from, and whether it was chosen.
 STATIC_RUNS = [
     ("rf_dw_raw", "rf_sweep", LC / "rf_landcover_dw_trial.tif",
-     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "raw"}),
+     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "raw",
+      "producing_script": "scripts/train_landcover_rf_dynamicworld.py --with-probabilities", **_TRAIN_300}),
     ("rf_dw_texture", "rf_sweep", LC / "rf_landcover_dw_trial_texture.tif",
-     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "texture_3x3_mean_std"}),
+     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "texture_3x3_mean_std",
+      "producing_script": "scripts/train_landcover_rf_dynamicworld_texture.py", **_TRAIN_300}),
     ("rf_dw_smooth3x3", "rf_sweep", LC / "rf_landcover_dw_trial_smoothed.tif",
      {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "smooth_3x3",
       "smoothing_window": "3", "selected": "best_rf",
-      "selection_note": "window fixed in advance (30 m), not tuned on the validation points"}),
+      "selection_note": "window fixed in advance (30 m), not tuned on the validation points",
+      "producing_script": "scripts/smooth_landcover_rf_dynamicworld.py", **_TRAIN_300}),
     ("unet_dw", "unet", LC / "unet_landcover_dw_trial.tif",
      {"label_source": "dynamicworld", "model_family": "unet", "selected": "production_landcover",
-      "selection_note": "highest accuracy and macro F1; gap to the hybrid is 6 vs 2 discordant points (McNemar p~0.29)"}),
+      "selection_note": "highest accuracy and macro F1; the gap to the hybrid is within noise (see parent run)",
+      "producing_script": "notebooks/colab_training/train_unet_dynamicworld_trial.ipynb + "
+                          "scripts/run_landcover_unet_inference_dynamicworld_trial.py", **_TRAIN_300}),
     ("hybrid_dw_rfraw", "hybrid_sweep", LC / "hybrid_landcover_dw_trial.tif",
-     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5"}),
+     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
+      "producing_script": "scripts/build_landcover_hybrid_dynamicworld_trial.py --rf-source raw", **_TRAIN_300}),
     ("hybrid_dw_rfsmooth3x3", "hybrid_sweep", LC / "hybrid_dynamicworld_rfsmoothed.tif",
-     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "smooth_3x3", "rf_weight": "0.5"}),
-    ("rf_worldcover", "worldcover_baseline", LC / "rf_landcover.tif",
-     {"label_source": "worldcover", "model_family": "rf"}),
+     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "smooth_3x3", "rf_weight": "0.5",
+      "producing_script": "scripts/build_landcover_hybrid_dynamicworld_trial.py --rf-source smoothed", **_TRAIN_300}),
+    ("rf_worldcover", "worldcover_baseline", LC / "rf_landcover_wc300.tif",
+     {"label_source": "worldcover", "model_family": "rf",
+      "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_TRAIN_300}),
     ("unet_worldcover", "worldcover_baseline", LC / "unet_landcover.tif",
-     {"label_source": "worldcover", "model_family": "unet"}),
-    ("hybrid_worldcover", "worldcover_baseline", LC / "hybrid_landcover.tif",
-     {"label_source": "worldcover", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5"}),
+     {"label_source": "worldcover", "model_family": "unet",
+      "producing_script": "notebooks/colab_training/train_unet.ipynb + scripts/run_landcover_unet_inference.py",
+      **_TRAIN_300}),
+    ("hybrid_worldcover", "worldcover_baseline", LC / "hybrid_landcover_wc300.tif",
+     {"label_source": "worldcover", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
+      "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_TRAIN_300}),
+]
+
+# Paired comparisons whose significance is logged on the parent run.
+MCNEMAR_PAIRS = [
+    ("hybrid_worldcover", "hybrid_dw_rfraw", "worldcover_vs_dynamicworld_hybrid"),
+    ("unet_worldcover", "unet_dw", "worldcover_vs_dynamicworld_unet"),
+    ("rf_worldcover", "rf_dw_raw", "worldcover_vs_dynamicworld_rf"),
+    ("rf_dw_raw", "unet_dw", "rf_vs_unet"),
+    ("rf_dw_raw", "rf_dw_smooth3x3", "rf_raw_vs_smooth3x3"),
+    ("rf_dw_raw", "rf_dw_texture", "rf_raw_vs_texture"),
+    ("hybrid_dw_rfraw", "unet_dw", "hybrid_vs_unet"),
+    ("hybrid_dw_rfraw", "hybrid_dw_rfsmooth3x3", "hybrid_rfraw_vs_rfsmooth"),
 ]
 
 
@@ -101,7 +140,8 @@ def _diagnostic_window_runs(tmp: Path) -> list:
         runs.append((f"rf_dw_smooth{window}x{window}", "rf_sweep", path,
                      {"label_source": "dynamicworld", "model_family": "rf",
                       "rf_variant": f"smooth_{window}x{window}", "smoothing_window": str(window),
-                      "diagnostic": "window_compared_on_validation_points"}))
+                      "diagnostic": "window_compared_on_validation_points",
+                      "producing_script": "built in this script from rf_landcover_dw_trial.tif", **_TRAIN_300}))
     return runs
 
 
@@ -123,27 +163,55 @@ def _blend_weight_runs(tmp: Path) -> list:
         path = _write_label_raster(tmp / f"blend_{w:.1f}.tif", label, profile)
         runs.append((f"hybrid_dw_unetweight{w:.1f}", "hybrid_sweep", path,
                      {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "raw",
-                      "rf_weight": f"{1 - w:.1f}"}))
+                      "rf_weight": f"{1 - w:.1f}",
+                      "producing_script": "built in this script from the DW RF and U-Net probability rasters",
+                      **_TRAIN_300}))
     return runs
 
 
-def _already_logged() -> bool:
+def _batch_runs(batch: str) -> pd.DataFrame:
     experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
     if experiment is None:
-        return False
-    runs = mlflow.search_runs([experiment.experiment_id], filter_string=f"tags.eval_batch = '{BATCH}'")
-    return len(runs) > 0
+        return pd.DataFrame()
+    return mlflow.search_runs([experiment.experiment_id], filter_string=f"tags.eval_batch = '{batch}'")
 
 
-def _log_run(name, group, raster, tags, validation_df, tmp: Path):
+def _mark_superseded():
+    """Tag (never delete) every run from earlier batches so the UI shows which
+    numbers were replaced and why."""
+    client = mlflow.tracking.MlflowClient()
+    for batch, reason in SUPERSEDED_BATCHES.items():
+        runs = _batch_runs(batch)
+        for run_id in runs.get("run_id", []):
+            client.set_tag(run_id, "superseded", "true")
+            client.set_tag(run_id, "superseded_by", BATCH)
+            client.set_tag(run_id, "superseded_reason", reason)
+        if len(runs):
+            print(f"Tagged {len(runs)} run(s) from batch '{batch}' as superseded.")
+
+
+def _per_point_correct(raster, labelled: pd.DataFrame) -> pd.Series:
+    """True/False per validation point (index = point_id), only where the
+    raster has a real prediction -- the same points evaluate_classifier scores."""
+    sampled = sample_raster_at_points(raster, labelled)
+    scored = sampled[sampled["pred_bucket"].notna() & (sampled["pred_bucket"] != 0)]
+    return pd.Series((scored["pred_bucket"] == scored["true_bucket"]).values, index=scored["point_id"].values)
+
+
+def _log_run(name, group, raster, tags, validation_df, labelled, tmp: Path, rng):
     result = evaluate_classifier(raster, validation_df, name)
+    correct = _per_point_correct(raster, labelled)
+    boot = [rng.choice(correct.values, len(correct)).mean() for _ in range(N_BOOT)]
+    built = datetime.fromtimestamp(Path(raster).stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+
     with start_run(name, experiment_name=EXPERIMENT_NAME, nested=True, stage="evaluation",
-                   eval_batch=BATCH, eval_group=group, evaluated_model=name, **tags):
+                   eval_batch=BATCH, eval_group=group, evaluated_model=name, raster_built=built, **tags):
         mlflow.log_param("raster", Path(raster).name)
         mlflow.log_param("n_validation_points", len(validation_df))
         mlflow.log_metrics({
-            "accuracy": result["accuracy"], "macro_f1": result["macro_f1"],
-            "weighted_f1": result["weighted_f1"], "n_scored": result["n_scored"],
+            "accuracy": result["accuracy"], "accuracy_ci95_low": float(np.percentile(boot, 2.5)),
+            "accuracy_ci95_high": float(np.percentile(boot, 97.5)),
+            "macro_f1": result["macro_f1"], "weighted_f1": result["weighted_f1"], "n_scored": result["n_scored"],
         })
         per_class = result["per_class_metrics"].set_index("class")
         mlflow.log_metrics({f"{cls}_f1": f1 for cls, f1 in per_class["f1"].items()})
@@ -156,13 +224,30 @@ def _log_run(name, group, raster, tags, validation_df, tmp: Path):
         log_artifact_safe(cm_path)
         log_artifact_safe(pc_path)
 
-    return {"run": name, "group": group, "accuracy": result["accuracy"],
-            "macro_f1": result["macro_f1"], "n_scored": result["n_scored"],
-            "selected": tags.get("selected", ""), "diagnostic": "yes" if "diagnostic" in tags else ""}
+    row = {"run": name, "group": group, "accuracy": result["accuracy"],
+           "ci95_low": float(np.percentile(boot, 2.5)), "ci95_high": float(np.percentile(boot, 97.5)),
+           "macro_f1": result["macro_f1"], "n_scored": result["n_scored"], "raster_built": built,
+           "selected": tags.get("selected", ""), "diagnostic": "yes" if "diagnostic" in tags else ""}
+    return row, correct
+
+
+def _mcnemar(correct: dict) -> pd.DataFrame:
+    rows = []
+    for a, b, label in MCNEMAR_PAIRS:
+        common = correct[a].index.intersection(correct[b].index)
+        ca, cb = correct[a].loc[common], correct[b].loc[common]
+        only_a, only_b = int((ca & ~cb).sum()), int((~ca & cb).sum())
+        n = only_a + only_b
+        p = binomtest(only_b, n, 0.5).pvalue if n else 1.0
+        rows.append({"comparison": label, "model_a": a, "model_b": b, "n_common": len(common),
+                     "accuracy_a": ca.mean(), "accuracy_b": cb.mean(),
+                     "only_a_correct": only_a, "only_b_correct": only_b, "p_value": p,
+                     "verdict": "real difference" if p < 0.05 else "within noise"})
+    return pd.DataFrame(rows)
 
 
 def main(force: bool = False):
-    if not force and _already_logged():
+    if not force and len(_batch_runs(BATCH)):
         print(f"Batch '{BATCH}' is already in MLflow — skipping (pass --force to log it again).")
         return
     missing = [str(r) for _, _, r, _ in STATIC_RUNS if not Path(r).exists()]
@@ -170,21 +255,34 @@ def main(force: bool = False):
         raise FileNotFoundError(f"Missing raster(s): {missing}")
 
     validation_df = pd.read_csv(VALIDATION_CSV)
-    rows = []
+    name_to_id = {v: k for k, v in BUCKET_NAMES.items()}
+    labelled = validation_df[validation_df["agreed_label"].isin(name_to_id)].copy()
+    labelled["true_bucket"] = labelled["agreed_label"].map(name_to_id)
+    rng = np.random.default_rng(RANDOM_SEED)
+
+    rows, correct = [], {}
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
         runs = STATIC_RUNS + _diagnostic_window_runs(tmp) + _blend_weight_runs(tmp)
         with start_run("dynamicworld_landcover_evaluation", experiment_name=EXPERIMENT_NAME,
                        stage="evaluation", eval_batch=BATCH, eval_group="parent"):
             mlflow.log_param("validation_csv", VALIDATION_CSV.name)
+            mlflow.log_param("bootstrap_draws", N_BOOT)
             for name, group, raster, tags in runs:
-                rows.append(_log_run(name, group, raster, tags, validation_df, tmp))
-            summary = pd.DataFrame(rows)
-            summary_path = tmp / "evaluation_summary.csv"
-            summary.to_csv(summary_path, index=False)
-            log_artifact_safe(summary_path)
+                row, correct[name] = _log_run(name, group, raster, tags, validation_df, labelled, tmp, rng)
+                rows.append(row)
 
-    print("\n" + summary.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+            summary = pd.DataFrame(rows)
+            significance = _mcnemar(correct)
+            mlflow.log_metrics({f"p_{r.comparison}": r.p_value for r in significance.itertuples()})
+            for df, fname in ((summary, "evaluation_summary.csv"), (significance, "significance_mcnemar.csv")):
+                df.to_csv(tmp / fname, index=False)
+                log_artifact_safe(tmp / fname)
+
+    _mark_superseded()
+    fmt = lambda x: f"{x:.3f}"
+    print("\n" + summary.to_string(index=False, float_format=fmt))
+    print("\n" + significance.to_string(index=False, float_format=fmt))
     print(f"\nLogged {len(rows)} runs to MLflow experiment '{EXPERIMENT_NAME}' under parent run "
           f"'dynamicworld_landcover_evaluation' (tag eval_batch={BATCH}).")
     print("Browse: mlflow ui --backend-store-uri sqlite:///mlflow.db")
