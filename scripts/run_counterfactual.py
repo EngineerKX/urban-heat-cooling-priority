@@ -41,7 +41,7 @@ from config.settings import (
 from src.heat_model.tabular import (
     XGB_TARGET_COLUMN,
     build_xgb_training_table,
-    fit_ndvi_vegetation_slope,
+    fit_index_landcover_model,
     predict_counterfactual_subzone,
 )
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
@@ -68,9 +68,9 @@ def run_xgb_counterfactual(subzone_id: str, delta_fraction_vegetation: float):
 
     with open(XGB_MODEL_PATH, "rb") as f:
         model = pickle.load(f)
-    ndvi_slope = fit_ndvi_vegetation_slope(df)
+    index_model = fit_index_landcover_model(df)
 
-    result = predict_counterfactual_subzone(model, row_df, delta_fraction_vegetation, ndvi_slope)
+    result = predict_counterfactual_subzone(model, row_df, delta_fraction_vegetation, index_model)
     print(f"\n--- XGBoost subzone-level counterfactual: {subzone_id} ---")
     print(f"  Current {XGB_TARGET_COLUMN}: {result['original_lst']:.2f}°C")
     print(f"  Requested vegetation-fraction delta: +{delta_fraction_vegetation:.2f} "

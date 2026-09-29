@@ -11,6 +11,7 @@ Usage: python scripts/train_heat_model_xgboost.py [--force-retrain]
 """
 
 import argparse
+import json
 import pickle
 import sys
 from pathlib import Path
@@ -33,7 +34,7 @@ from src.heat_model.tabular import (
     XGB_FEATURE_COLUMNS,
     XGB_TARGET_COLUMN,
     build_xgb_training_table,
-    fit_ndvi_vegetation_slope,
+    fit_index_landcover_model,
     train_xgb_model,
 )
 from src.utils.experiment_tracking import HEAT_MODEL_EXPERIMENT_NAME, log_artifact_safe, start_run
@@ -46,7 +47,9 @@ OUT_DIR = PROCESSED_DIR / "heat_model"
 MODEL_OUT_PATH = OUT_DIR / "xgb_model.pkl"
 PREDICTIONS_OUT_PATH = OUT_DIR / "xgb_predictions.csv"
 FEATURE_IMPORTANCE_OUT_PATH = OUT_DIR / "xgb_feature_importance.csv"
-NDVI_SLOPE_OUT_PATH = OUT_DIR / "xgb_ndvi_slope.txt"
+# The spectral-index ~ land-cover fit the greening counterfactual uses to keep
+# an edited subzone's NDVI/NDBI consistent with its new land cover.
+INDEX_MODEL_OUT_PATH = OUT_DIR / "xgb_index_landcover_model.json"
 
 
 def main(force_retrain: bool = False):
@@ -74,8 +77,10 @@ def main(force_retrain: bool = False):
         model, metrics = train_xgb_model(df, seed=RANDOM_SEED)
         mlflow.log_metrics(metrics)
 
-        ndvi_slope = fit_ndvi_vegetation_slope(df)
-        mlflow.log_metric("ndvi_vegetation_slope", ndvi_slope)
+        index_model = fit_index_landcover_model(df)
+        mlflow.log_metrics({f"index_fit_r2_{col}": r2 for col, r2 in index_model["r2"].items()})
+        mlflow.log_metrics({f"index_coef_{col}_{frac.replace('fraction_', '')}": coef
+                            for col, coefs in index_model["coefs"].items() for frac, coef in coefs.items()})
 
         importances = pd.Series(
             model.feature_importances_, index=XGB_FEATURE_COLUMNS, name="importance"
@@ -95,7 +100,7 @@ def main(force_retrain: bool = False):
             columns={XGB_TARGET_COLUMN: "lst_actual"}
         ).to_csv(PREDICTIONS_OUT_PATH, index=False)
         importances.to_csv(FEATURE_IMPORTANCE_OUT_PATH)
-        NDVI_SLOPE_OUT_PATH.write_text(str(ndvi_slope))
+        INDEX_MODEL_OUT_PATH.write_text(json.dumps(index_model, indent=1))
 
     print(f"\nSaved: {MODEL_OUT_PATH}")
     print(f"Saved: {PREDICTIONS_OUT_PATH}")

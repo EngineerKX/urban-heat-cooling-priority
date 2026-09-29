@@ -34,7 +34,7 @@ from config.settings import (
     TARGET_SCALE_M,
     UNET_PATCH_SIZE,
 )
-from src.heat_model.tabular import build_xgb_training_table, fit_ndvi_vegetation_slope, predict_counterfactual_subzone
+from src.heat_model.tabular import build_xgb_training_table, fit_index_landcover_model, predict_counterfactual_subzone
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 from src.ingest.worldcover import BUCKET_NAMES
 
@@ -58,15 +58,15 @@ else:
     @st.cache_data
     def load_xgb_assets():
         df = build_xgb_training_table(HEAT_CSV_PATH, HOTSPOT_CLUSTERS_CSV_PATH, SENSITIVITY_CSV_PATH)
-        ndvi_slope = fit_ndvi_vegetation_slope(df)
-        return df, ndvi_slope
+        index_model = fit_index_landcover_model(df)
+        return df, index_model
 
     @st.cache_resource
     def load_xgb_model():
         with open(XGB_MODEL_PATH, "rb") as f:
             return pickle.load(f)
 
-    xgb_df, ndvi_slope = load_xgb_assets()
+    xgb_df, index_model = load_xgb_assets()
     xgb_model = load_xgb_model()
 
     subzone_ids = sorted(xgb_df["subzone_id"].astype(str).unique())
@@ -84,7 +84,7 @@ else:
         value=float(min(0.15, max_delta)), step=0.01,
     )
 
-    result = predict_counterfactual_subzone(xgb_model, row_df, delta, ndvi_slope)
+    result = predict_counterfactual_subzone(xgb_model, row_df, delta, index_model)
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Current LST", f"{result['original_lst']:.2f}°C")

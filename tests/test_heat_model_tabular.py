@@ -17,7 +17,7 @@ import pandas as pd
 from src.heat_model.tabular import (
     XGB_FEATURE_COLUMNS,
     XGB_TARGET_COLUMN,
-    fit_ndvi_vegetation_slope,
+    fit_index_landcover_model,
     predict_counterfactual_subzone,
     redistribute_vegetation_fraction,
     train_xgb_model,
@@ -88,14 +88,14 @@ def test_predict_counterfactual_subzone_direction():
     model, metrics = train_xgb_model(df, test_size=0.25)
     assert metrics["test_r2"] > 0.5, f"sanity check on the synthetic fit itself failed, R²={metrics['test_r2']:.3f}"
 
-    ndvi_slope = fit_ndvi_vegetation_slope(df)
-    assert ndvi_slope > 0, "NDVI should rise with vegetation fraction by construction of the synthetic data"
+    index_model = fit_index_landcover_model(df)
+    assert index_model["coefs"]["ndvi_dry"]["fraction_vegetation"] > 0, "NDVI should rise with vegetation by construction"
 
     # Pick a mid-range-vegetation row so a +0.2 delta doesn't clamp.
     mid_idx = (df["fraction_vegetation"] - 0.4).abs().idxmin()
     row_df = df.loc[[mid_idx]]
 
-    result = predict_counterfactual_subzone(model, row_df, delta_fraction_vegetation=0.2, ndvi_slope=ndvi_slope)
+    result = predict_counterfactual_subzone(model, row_df, delta_fraction_vegetation=0.2, index_model=index_model)
     assert result["delta_lst"] < 0, (
         f"increasing vegetation should decrease predicted LST given the synthetic ground truth, "
         f"got delta_lst={result['delta_lst']:.3f}"

@@ -41,7 +41,7 @@ from src.heat_model.tabular import (
     XGB_FEATURE_COLUMNS,
     XGB_TARGET_COLUMN,
     build_xgb_training_table,
-    fit_ndvi_vegetation_slope,
+    fit_index_landcover_model,
     predict_counterfactual_subzone,
 )
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
@@ -83,7 +83,7 @@ def main():
     df = build_xgb_training_table(HEAT_CSV_PATH, HOTSPOT_CLUSTERS_CSV_PATH, SENSITIVITY_CSV_PATH)
     with open(XGB_MODEL_PATH, "rb") as f:
         xgb_model = pickle.load(f)
-    ndvi_slope = fit_ndvi_vegetation_slope(df)
+    index_model = fit_index_landcover_model(df)
 
     print("--- XGBoost (recomputed on full table, not held-out — see training run's own printed test RMSE/R²) ---")
     all_pred = xgb_model.predict(df[XGB_FEATURE_COLUMNS])
@@ -122,7 +122,7 @@ def main():
             print(f"\n⚠️  '{subzone_id}' not found — skipping.")
             continue
 
-        xgb_result = predict_counterfactual_subzone(xgb_model, row_df, DEMO_DELTA_VEGETATION, ndvi_slope)
+        xgb_result = predict_counterfactual_subzone(xgb_model, row_df, DEMO_DELTA_VEGETATION, index_model)
         example = {"subzone_id": subzone_id, "delta_fraction_vegetation": DEMO_DELTA_VEGETATION, "xgboost": xgb_result}
         print(f"\n--- {subzone_id} ---")
         print(f"  XGBoost: {xgb_result['original_lst']:.2f}°C -> {xgb_result['counterfactual_lst']:.2f}°C "

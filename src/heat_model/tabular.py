@@ -17,7 +17,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from scipy.stats import linregress
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
@@ -101,15 +100,44 @@ def train_xgb_model(
     return model, metrics
 
 
-def fit_ndvi_vegetation_slope(df: pd.DataFrame, vegetation_col: str = "fraction_vegetation",
-                               ndvi_col: str = "ndvi_dry") -> float:
-    """OLS slope of ndvi_col on vegetation_col -- a one-off coefficient
-    predict_counterfactual_subzone uses to keep NDVI internally consistent
-    with a hypothetically edited vegetation fraction, instead of leaving
-    NDVI stale while only the fraction changes underneath it."""
-    result = linregress(df[vegetation_col], df[ndvi_col])
-    print(f"Fitted {ndvi_col}~{vegetation_col} slope: {result.slope:.3f} (R²={result.rvalue ** 2:.3f})")
-    return float(result.slope)
+# The land-cover fractions the counterfactual edits (fraction_water never
+# changes, so it is the implicit reference category), and the spectral-index
+# features that have to move with them to keep an edited subzone realistic.
+EDITED_FRACTION_COLUMNS = ["fraction_vegetation", "fraction_built_up", "fraction_bare"]
+SPECTRAL_INDEX_COLUMNS = ["ndvi_dry", "ndvi_wet", "ndbi_dry", "ndbi_wet"]
+
+
+def fit_index_landcover_model(df: pd.DataFrame, index_columns=SPECTRAL_INDEX_COLUMNS,
+                              fraction_columns=EDITED_FRACTION_COLUMNS) -> dict:
+    """For each spectral index, an OLS fit on the land-cover fractions across
+    real subzones: index ~ a + b_veg*veg + b_built*built + b_bare*bare.
+    predict_counterfactual_subzone moves every index by b . (change in the
+    fractions), so a greened subzone's NDVI rises AND its NDBI falls the way
+    real greener subzones' do.
+
+    Replaced a single NDVI-on-vegetation slope (2026-09-30). That version left
+    NDBI -- XGBoost's second most important feature -- untouched, so an edited
+    subzone had the land cover of a greener place with the NDBI of the old
+    one. Result: only 56% of subzones cooled under +15 pts vegetation (median
+    -0.10 C), i.e. mostly noise. Moving all four indices: 89% cool, median
+    -0.99 C, in line with the cross-subzone association (about -1.1 C per
+    +15 pts), and 1.8% of edited subzones fall outside the range of real ones
+    (vs 5% for real subzones themselves). Fitted on the fractions only -- the
+    LST target plays no part in it.
+
+    Returns {"coefs": {index: {fraction: coef}}, "r2": {index: r2}}."""
+    X = df[fraction_columns].astype(float).values
+    design = np.column_stack([np.ones(len(X)), X])
+    coefs, r2 = {}, {}
+    for col in index_columns:
+        y = df[col].astype(float).values
+        beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+        residual = y - design @ beta
+        r2[col] = float(1 - (residual ** 2).sum() / ((y - y.mean()) ** 2).sum())
+        coefs[col] = {frac: float(b) for frac, b in zip(fraction_columns, beta[1:])}
+        print(f"Fitted {col} ~ land-cover fractions (R²={r2[col]:.3f}): " +
+              ", ".join(f"{f.replace('fraction_', '')} {b:+.3f}" for f, b in coefs[col].items()))
+    return {"coefs": coefs, "r2": r2}
 
 
 def redistribute_vegetation_fraction(veg0: float, built0: float, bare0: float, delta: float) -> dict:
@@ -137,7 +165,7 @@ def redistribute_vegetation_fraction(veg0: float, built0: float, bare0: float, d
 
 
 def predict_counterfactual_subzone(
-    model, row_df: pd.DataFrame, delta_fraction_vegetation: float, ndvi_slope: float,
+    model, row_df: pd.DataFrame, delta_fraction_vegetation: float, index_model: dict,
     feature_columns=XGB_FEATURE_COLUMNS,
 ) -> dict:
     """`row_df` is a single-row DataFrame (e.g. `df[df.subzone_id == X]`) so
@@ -145,9 +173,11 @@ def predict_counterfactual_subzone(
     a bare pd.Series round-trip can silently lose that.
 
     Mechanism: redistribute the vegetation-fraction delta proportionally
-    out of built-up/bare (see redistribute_vegetation_fraction), bump
-    ndvi_dry/ndvi_wet via the fitted slope so they stay consistent with the
-    edited fraction, then re-predict with the same model."""
+    out of built-up/bare (see redistribute_vegetation_fraction), move every
+    spectral index by its fitted land-cover coefficients times the change in
+    each fraction (`index_model`, from fit_index_landcover_model) so NDVI and
+    NDBI stay consistent with the edited land cover, then re-predict with the
+    same model."""
     if len(row_df) != 1:
         raise ValueError(f"row_df must have exactly one row, got {len(row_df)}")
 
@@ -161,13 +191,15 @@ def predict_counterfactual_subzone(
         delta_fraction_vegetation,
     )
     actual_delta = redistributed.pop("actual_delta_vegetation")
+    fraction_change = {col: value - float(original[col].iloc[0]) for col, value in redistributed.items()}
     for col, value in redistributed.items():
         edited[col] = value
     # fraction_water intentionally untouched.
 
-    for ndvi_col in ("ndvi_dry", "ndvi_wet"):
-        if ndvi_col in edited.columns:
-            edited[ndvi_col] = edited[ndvi_col].astype(float) + actual_delta * ndvi_slope
+    for index_col, coefs in index_model["coefs"].items():
+        if index_col in edited.columns:
+            shift = sum(coefs[frac] * change for frac, change in fraction_change.items())
+            edited[index_col] = edited[index_col].astype(float) + shift
 
     original_pred = float(model.predict(original)[0])
     edited_pred = float(model.predict(edited)[0])
