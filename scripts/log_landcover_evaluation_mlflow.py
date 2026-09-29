@@ -50,60 +50,61 @@ import pandas as pd
 import rasterio
 from scipy.stats import binomtest
 
-from config.settings import INTERIM_DIR, PROCESSED_DIR, RANDOM_SEED
+from config.settings import DW_TRAIN_END, DW_TRAIN_START, INTERIM_DIR, PROCESSED_DIR, RANDOM_SEED
 from src.ingest.worldcover import BUCKET_NAMES
-from src.landcover.hybrid import load_prob_raster
-from src.landcover.spatial_smoothing import majority_smooth
+from src.landcover.hybrid import build_hybrid, load_prob_raster
+from src.landcover.spatial_smoothing import majority_smooth, write_smoothed_outputs
 from src.utils.experiment_tracking import EXPERIMENT_NAME, log_artifact_safe, start_run
 from validation.landcover_validation.classifier_evaluation import evaluate_classifier, sample_raster_at_points
 
-BATCH = "dynamicworld_eval_2026-09-29b"
+BATCH = "landcover_eval_final_2026-09-29c"
 SUPERSEDED_BATCHES = {
     "dynamicworld_eval_2026-09-29": "WorldCover RF/hybrid baselines used a model trained against the old "
                                     "200-point validation sample; replaced by a retrain against the current 300.",
+    "dynamicworld_eval_2026-09-29b": "Trial models trained on an open-ended Dynamic World window (every image up "
+                                     "to the training day), so not reproducible; replaced by the final models on "
+                                     "the fixed window (config.settings.DATA_END_DATE).",
 }
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 LC = PROCESSED_DIR / "landcover"
+
+# Final production rasters (Dynamic World labels, fixed window) and their probabilities.
+RF_FINAL, RF_FINAL_PROB = LC / "rf_landcover.tif", LC / "rf_landcover_prob.tif"
+UNET_FINAL, UNET_FINAL_PROB = LC / "unet_landcover.tif", LC / "unet_landcover_prob.tif"
 
 DIAGNOSTIC_WINDOWS = [5, 7, 11, 21]
 BLEND_UNET_WEIGHTS = [0.9, 0.8, 0.7, 0.6]  # 0.5 is the standard hybrid, logged separately
 N_BOOT = 4000
 
 _TRAIN_300 = {"trained_n_validation_points": "300"}
+_DW = {"label_source": "dynamicworld", "label_window": f"{DW_TRAIN_START}..{DW_TRAIN_END}", **_TRAIN_300}
+_WC = {"label_source": "worldcover", **_TRAIN_300}
 # (run name, group, raster, tags). Tags say what the run is, where it came from, and whether it was chosen.
 STATIC_RUNS = [
-    ("rf_dw_raw", "rf_sweep", LC / "rf_landcover_dw_trial.tif",
-     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "raw",
-      "producing_script": "scripts/train_landcover_rf_dynamicworld.py --with-probabilities", **_TRAIN_300}),
-    ("rf_dw_texture", "rf_sweep", LC / "rf_landcover_dw_trial_texture.tif",
-     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "texture_3x3_mean_std",
-      "producing_script": "scripts/train_landcover_rf_dynamicworld_texture.py", **_TRAIN_300}),
-    ("rf_dw_smooth3x3", "rf_sweep", LC / "rf_landcover_dw_trial_smoothed.tif",
-     {"label_source": "dynamicworld", "model_family": "rf", "rf_variant": "smooth_3x3",
-      "smoothing_window": "3", "selected": "best_rf",
-      "selection_note": "window fixed in advance (30 m), not tuned on the validation points",
-      "producing_script": "scripts/smooth_landcover_rf_dynamicworld.py", **_TRAIN_300}),
-    ("unet_dw", "unet", LC / "unet_landcover_dw_trial.tif",
-     {"label_source": "dynamicworld", "model_family": "unet", "selected": "production_landcover",
-      "selection_note": "highest accuracy and macro F1; the gap to the hybrid is within noise (see parent run)",
-      "producing_script": "notebooks/colab_training/train_unet_dynamicworld_trial.ipynb + "
-                          "scripts/run_landcover_unet_inference_dynamicworld_trial.py", **_TRAIN_300}),
-    ("hybrid_dw_rfraw", "hybrid_sweep", LC / "hybrid_landcover_dw_trial.tif",
-     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
-      "producing_script": "scripts/build_landcover_hybrid_dynamicworld_trial.py --rf-source raw", **_TRAIN_300}),
-    ("hybrid_dw_rfsmooth3x3", "hybrid_sweep", LC / "hybrid_dynamicworld_rfsmoothed.tif",
-     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "smooth_3x3", "rf_weight": "0.5",
-      "producing_script": "scripts/build_landcover_hybrid_dynamicworld_trial.py --rf-source smoothed", **_TRAIN_300}),
+    ("rf_dw_raw", "rf_sweep", RF_FINAL,
+     {"model_family": "rf", "rf_variant": "raw",
+      "producing_script": "scripts/train_landcover_rf.py --with-probabilities", **_DW}),
+    ("rf_dw_texture", "rf_sweep", LC / "rf_landcover_texture.tif",
+     {"model_family": "rf", "rf_variant": "texture_3x3_mean_std",
+      "producing_script": "scripts/train_landcover_rf_dynamicworld_texture.py", **_DW}),
+    ("unet_dw", "unet", UNET_FINAL,
+     {"model_family": "unet", "selected": "production_landcover",
+      "selection_note": "highest accuracy and macro F1 of the final models; the gap to the hybrid is within "
+                        "noise (see parent run)",
+      "producing_script": "notebooks/colab_training/train_unet.ipynb + "
+                          "scripts/run_landcover_unet_inference.py --with-probabilities", **_DW}),
+    ("hybrid_dw_rfraw", "hybrid_sweep", LC / "hybrid_landcover.tif",
+     {"model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
+      "producing_script": "scripts/build_landcover_hybrid.py --force", **_DW}),
     ("rf_worldcover", "worldcover_baseline", LC / "rf_landcover_wc300.tif",
-     {"label_source": "worldcover", "model_family": "rf",
-      "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_TRAIN_300}),
-    ("unet_worldcover", "worldcover_baseline", LC / "unet_landcover.tif",
-     {"label_source": "worldcover", "model_family": "unet",
-      "producing_script": "notebooks/colab_training/train_unet.ipynb + scripts/run_landcover_unet_inference.py",
-      **_TRAIN_300}),
+     {"model_family": "rf", "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_WC}),
+    ("unet_worldcover", "worldcover_baseline", LC / "unet_landcover_worldcover.tif",
+     {"model_family": "unet",
+      "producing_script": "notebooks/colab_training/train_unet.ipynb (2026-09-18 WorldCover run) + "
+                          "scripts/run_landcover_unet_inference.py", **_WC}),
     ("hybrid_worldcover", "worldcover_baseline", LC / "hybrid_landcover_wc300.tif",
-     {"label_source": "worldcover", "model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
-      "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_TRAIN_300}),
+     {"model_family": "hybrid", "rf_input": "raw", "rf_weight": "0.5",
+      "producing_script": "scripts/train_landcover_rf_worldcover_baseline.py", **_WC}),
 ]
 
 # Paired comparisons whose significance is logged on the parent run.
@@ -126,11 +127,32 @@ def _write_label_raster(path: Path, label: np.ndarray, profile: dict) -> Path:
     return path
 
 
+def _smoothed_runs(tmp: Path) -> list:
+    """The selected 3x3-smoothed RF and the smoothed-RF hybrid, rebuilt here
+    from the final RF so they can't drift from it."""
+    label_path, prob_path = write_smoothed_outputs(
+        RF_FINAL, sorted(BUCKET_NAMES), BUCKET_NAMES, window=3,
+        label_out_path=tmp / "rf_smooth3x3.tif", prob_out_path=tmp / "rf_smooth3x3_prob.tif",
+    )
+    hybrid_path, _ = build_hybrid(prob_path, UNET_FINAL_PROB, label_out_path=tmp / "hybrid_rfsmooth3x3.tif",
+                                  prob_out_path=tmp / "hybrid_rfsmooth3x3_prob.tif")
+    return [
+        ("rf_dw_smooth3x3", "rf_sweep", label_path,
+         {"model_family": "rf", "rf_variant": "smooth_3x3", "smoothing_window": "3", "selected": "best_rf",
+          "selection_note": "window fixed in advance (30 m), not tuned on the validation points",
+          "producing_script": "built in this script from rf_landcover.tif (src/landcover/spatial_smoothing.py)",
+          **_DW}),
+        ("hybrid_dw_rfsmooth3x3", "hybrid_sweep", hybrid_path,
+         {"model_family": "hybrid", "rf_input": "smooth_3x3", "rf_weight": "0.5",
+          "producing_script": "built in this script from the smoothed RF and unet_landcover_prob.tif", **_DW}),
+    ]
+
+
 def _diagnostic_window_runs(tmp: Path) -> list:
     """Wider majority-vote windows on the raw RF. Logged for completeness, but
     tagged diagnostic: comparing window sizes against the validation points
     and keeping the best would be tuning on the test set."""
-    with rasterio.open(LC / "rf_landcover_dw_trial.tif") as src:
+    with rasterio.open(RF_FINAL) as src:
         label, profile = src.read(1), src.profile
     class_ids = sorted(BUCKET_NAMES)
     runs = []
@@ -138,21 +160,18 @@ def _diagnostic_window_runs(tmp: Path) -> list:
         smoothed, _ = majority_smooth(label, class_ids, window=window)
         path = _write_label_raster(tmp / f"rf_smooth{window}.tif", smoothed, profile)
         runs.append((f"rf_dw_smooth{window}x{window}", "rf_sweep", path,
-                     {"label_source": "dynamicworld", "model_family": "rf",
-                      "rf_variant": f"smooth_{window}x{window}", "smoothing_window": str(window),
-                      "diagnostic": "window_compared_on_validation_points",
-                      "producing_script": "built in this script from rf_landcover_dw_trial.tif", **_TRAIN_300}))
+                     {"model_family": "rf", "rf_variant": f"smooth_{window}x{window}",
+                      "smoothing_window": str(window), "diagnostic": "window_compared_on_validation_points",
+                      "producing_script": "built in this script from rf_landcover.tif", **_DW}))
     return runs
 
 
 def _blend_weight_runs(tmp: Path) -> list:
     """RF/U-Net probability blends at fixed U-Net weights, on the raw RF."""
-    rf_prob_path = LC / "rf_landcover_dw_trial_prob.tif"
-    unet_prob_path = LC / "unet_landcover_dw_trial_prob.tif"
-    with rasterio.open(rf_prob_path) as ref:
+    with rasterio.open(RF_FINAL_PROB) as ref:
         transform, crs, shape = ref.transform, ref.crs, (ref.height, ref.width)
-    rf_prob, rf_valid = load_prob_raster(rf_prob_path, transform, crs, shape)
-    unet_prob, unet_valid = load_prob_raster(unet_prob_path, transform, crs, shape)
+    rf_prob, rf_valid = load_prob_raster(RF_FINAL_PROB, transform, crs, shape)
+    unet_prob, unet_valid = load_prob_raster(UNET_FINAL_PROB, transform, crs, shape)
     valid = rf_valid & unet_valid
     profile = {"driver": "GTiff", "height": shape[0], "width": shape[1], "crs": crs, "transform": transform}
 
@@ -162,10 +181,9 @@ def _blend_weight_runs(tmp: Path) -> list:
         label[~valid] = 0
         path = _write_label_raster(tmp / f"blend_{w:.1f}.tif", label, profile)
         runs.append((f"hybrid_dw_unetweight{w:.1f}", "hybrid_sweep", path,
-                     {"label_source": "dynamicworld", "model_family": "hybrid", "rf_input": "raw",
-                      "rf_weight": f"{1 - w:.1f}",
-                      "producing_script": "built in this script from the DW RF and U-Net probability rasters",
-                      **_TRAIN_300}))
+                     {"model_family": "hybrid", "rf_input": "raw", "rf_weight": f"{1 - w:.1f}",
+                      "producing_script": "built in this script from rf_landcover_prob.tif and "
+                                          "unet_landcover_prob.tif", **_DW}))
     return runs
 
 
@@ -263,8 +281,8 @@ def main(force: bool = False):
     rows, correct = [], {}
     with tempfile.TemporaryDirectory() as tmp_str:
         tmp = Path(tmp_str)
-        runs = STATIC_RUNS + _diagnostic_window_runs(tmp) + _blend_weight_runs(tmp)
-        with start_run("dynamicworld_landcover_evaluation", experiment_name=EXPERIMENT_NAME,
+        runs = STATIC_RUNS + _smoothed_runs(tmp) + _diagnostic_window_runs(tmp) + _blend_weight_runs(tmp)
+        with start_run("landcover_evaluation_final", experiment_name=EXPERIMENT_NAME,
                        stage="evaluation", eval_batch=BATCH, eval_group="parent"):
             mlflow.log_param("validation_csv", VALIDATION_CSV.name)
             mlflow.log_param("bootstrap_draws", N_BOOT)
@@ -284,7 +302,7 @@ def main(force: bool = False):
     print("\n" + summary.to_string(index=False, float_format=fmt))
     print("\n" + significance.to_string(index=False, float_format=fmt))
     print(f"\nLogged {len(rows)} runs to MLflow experiment '{EXPERIMENT_NAME}' under parent run "
-          f"'dynamicworld_landcover_evaluation' (tag eval_batch={BATCH}).")
+          f"'landcover_evaluation_final' (tag eval_batch={BATCH}).")
     print("Browse: mlflow ui --backend-store-uri sqlite:///mlflow.db")
 
 

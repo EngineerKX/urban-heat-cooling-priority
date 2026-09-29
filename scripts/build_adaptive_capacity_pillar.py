@@ -79,7 +79,7 @@ def main(force: bool = False):
         both_present = ac_df[["greenery_fraction_ndvi", landcover_col]].dropna()
         if len(both_present) >= 2:
             corr, _ = spearmanr(both_present["greenery_fraction_ndvi"], both_present[landcover_col])
-            print(f"\nSpearman(NDVI proxy, land-cover hybrid) = {corr:.3f} "
+            print(f"\nSpearman(NDVI proxy, land-cover map) = {corr:.3f} "
                   f"over {len(both_present)} subzones with both values.")
         else:
             print("\n⚠️  Too few overlapping subzones to compute a comparison correlation.")

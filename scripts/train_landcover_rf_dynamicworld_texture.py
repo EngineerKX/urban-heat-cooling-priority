@@ -68,10 +68,10 @@ TEXTURE_BANDS = [f"{b}_mean" for b in INDEX_BANDS] + [f"{b}_stdDev" for b in IND
 FEATURE_BANDS_TEXTURE = ALL_FEATURE_BANDS + TEXTURE_BANDS
 
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
-RF_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_dw_trial_texture.tif"
-RF_PROB_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_dw_trial_texture_prob.tif"
-EVAL_DIR_DW = PROCESSED_DIR / "landcover" / "evaluation" / "dw_trial"
-CLASSIFIER_ASSET_ID_DW = f"projects/{GEE_PROJECT_ID}/assets/rf_landcover_classifier_dw_trial_texture"
+RF_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_texture.tif"
+RF_PROB_RASTER_PATH_DW = PROCESSED_DIR / "landcover" / "rf_landcover_texture_prob.tif"
+EVAL_DIR_DW = PROCESSED_DIR / "landcover" / "evaluation" / "texture"
+CLASSIFIER_ASSET_ID_DW = f"projects/{GEE_PROJECT_ID}/assets/rf_landcover_classifier_texture"
 PRODUCTION_COMPARISON_CSV = PROCESSED_DIR / "landcover" / "evaluation" / "comparison_table.csv"
 TRIAL_COMPARISON_CSV = EVAL_DIR_DW / "comparison_table.csv"
 
