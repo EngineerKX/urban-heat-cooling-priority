@@ -52,10 +52,10 @@ from src.landcover.rf_baseline import (
     classify_probability,
     export_classified_raster,
     extract_training_samples,
-    informal_accuracy_check,
     train_rf_classifier,
 )
 from src.utils.experiment_tracking import log_artifact_safe, start_run
+from validation.landcover_validation.classifier_evaluation import evaluate_classifier
 
 VALIDATION_CSV = INTERIM_DIR / "validation_sample" / "validation_sample_300_labeled.csv"
 
@@ -115,12 +115,17 @@ def main(use_asset_cache: bool = True, with_probabilities: bool = False):
         )
         classified = classify(feature_image, classifier, boundary)
 
-        accuracy, crosstab = informal_accuracy_check(classified, validation_df)
+        # Export first, then score the downloaded raster locally -- the same code
+        # (and the same point sampling) as the formal evaluation. Scoring the
+        # un-exported image with a synchronous GEE sampleRegions call timed out
+        # (EE's 5-minute limit) on 2026-09-29 before anything had been saved.
         export_classified_raster(classified, boundary)
         print(f"\nDone. Classified raster: {RF_RASTER_PATH}")
 
-        mlflow.log_metric("informal_accuracy", accuracy)
-        mlflow.log_metric("n_scored", int(crosstab.values.sum()))
+        result = evaluate_classifier(RF_RASTER_PATH, validation_df, "rf")
+        mlflow.log_metrics({
+            "accuracy": result["accuracy"], "macro_f1": result["macro_f1"], "n_scored": result["n_scored"],
+        })
         log_artifact_safe(RF_RASTER_PATH)
 
         if with_probabilities:

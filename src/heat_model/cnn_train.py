@@ -27,11 +27,11 @@ def train_cnn_regressor(
     base_filters=CNN_BASE_FILTERS, force_retrain: bool = False,
 ):
     """Same "skip if a saved model already exists" caching convention as
-    `src/landcover/unet_train.py::train_unet`. No content-fingerprint cache
-    here -- unlike U-Net's training labels, this model's target/features
-    come from already-cached rasters rather than a validation CSV that gets
-    relabeled, so there's no separate "did the underlying data change"
-    signal to hash."""
+    `src/landcover/unet_train.py::train_unet`, but WITHOUT a content
+    fingerprint: the cache can't tell whether the land-cover map feeding the
+    input channels changed (it does whenever the land-cover model is
+    retrained). The training notebook therefore passes force_retrain=True and
+    records the land-cover map's sha256 with the run instead."""
     model_save_path = Path(model_save_path)
 
     if model_save_path.exists() and not force_retrain:
