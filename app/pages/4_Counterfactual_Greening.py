@@ -120,7 +120,7 @@ else:
 
     @st.cache_resource
     def load_cnn_assets():
-        """Reads all ~1000 patches + reprojects the hybrid/LST rasters onto
+        """Reads all ~1000 patches + reprojects the land-cover/LST rasters onto
         each -- a real one-time cost (tens of seconds), so cached per session
         rather than re-run on every slider move."""
         X, _y, valid_mask = build_local_feature_target_patches(

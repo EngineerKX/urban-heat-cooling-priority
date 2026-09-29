@@ -17,8 +17,14 @@ import plotly.express as px
 import streamlit as st
 
 from config.settings import (
-    CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS,
+    CNN_MODEL_SAVE_PATH, DIAGNOSTICS_DIR, EXPOSURE_NOISE_SOURCE, INTERIM_DIR, LANDCOVER_LABEL_SOURCE,
+    LANDCOVER_PRODUCTION_MODEL, PROCESSED_DIR, TOP_N, VARIANT_COLUMNS,
 )
+
+# Display names for the LANDCOVER_PRODUCTION_MODEL keys.
+_MODEL_NAMES = {"rf": "RF", "unet": "U-Net", "hybrid": "hybrid"}
+PRODUCTION_MODEL_NAME = _MODEL_NAMES[LANDCOVER_PRODUCTION_MODEL]
+LABEL_SOURCE_NAME = {"dynamicworld": "Dynamic World", "worldcover": "WorldCover"}[LANDCOVER_LABEL_SOURCE]
 from validation.score_validation.decision_impact import build_decision_impact_summary, noise_floor
 from validation.score_validation.rank_impact import heldout_agreement
 
@@ -48,10 +54,16 @@ with st.expander("Land-cover classifiers: RF vs. U-Net vs. hybrid", expanded=Tru
     if comparison_path.exists():
         comparison_df = pd.read_csv(comparison_path)
         st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        st.caption(
+            f"All three trained on {LABEL_SOURCE_NAME} labels and scored against the 300 hand-labelled points. "
+            f"The production land-cover map is **{PRODUCTION_MODEL_NAME}** (config.settings.LANDCOVER_PRODUCTION_MODEL); "
+            f"the others are kept as comparisons. Confidence intervals and significance tests are in MLflow "
+            f"(experiment landcover_classifiers, parent run landcover_evaluation_final)."
+        )
 
-        confusion_path = eval_dir / "confusion_matrix_hybrid.csv"
+        confusion_path = eval_dir / f"confusion_matrix_{LANDCOVER_PRODUCTION_MODEL}.csv"
         if confusion_path.exists():
-            st.markdown("**Hybrid confusion matrix**")
+            st.markdown(f"**{PRODUCTION_MODEL_NAME} confusion matrix (production land-cover map)**")
             confusion_df = pd.read_csv(confusion_path).rename(columns={"Unnamed: 0": "actual \\ predicted"})
             st.dataframe(confusion_df, use_container_width=True, hide_index=True)
     else:
@@ -140,9 +152,10 @@ with st.expander("Rank-impact ablation (C3: heat-variant choice vs. score)", exp
         st.dataframe(pd.read_csv(swap_path), use_container_width=True, hide_index=True)
         st.caption(
             "The greenery fraction feeding the adaptive-capacity pillar is taken from each classifier's raster in "
-            "turn (exposure, sensitivity and PCA weighting held fixed) and compared with the production hybrid. Only "
-            "the vegetation share reaches the score, so e.g. U-Net's zero recall on bare land matters only through "
-            "vegetation. A constant misclassification rate changes nothing (an affine distortion that the "
+            f"turn (exposure, sensitivity and PCA weighting held fixed) and compared with the production "
+            f"{PRODUCTION_MODEL_NAME} map. Only the vegetation share reaches the score, so a classifier's errors on "
+            "other classes (e.g. bare land) matter only through vegetation. A constant misclassification rate "
+            "changes nothing (an affine distortion that the "
             "normalisation cancels); only errors that vary between subzones can move a rank."
         )
     else:
@@ -256,7 +269,8 @@ with st.expander("S6 — confidence bands", expanded=False):
         st.dataframe(top20, use_container_width=True, hide_index=True)
         st.caption(
             f"Bootstrapped from the offset-removed spread of Landsat LST vs the {EXPOSURE_NOISE_SOURCE.upper()} "
-            f"held-out source (exposure) + the hybrid-vs-NDVI-proxy greenery disagreement (adaptive capacity) — NOT "
+            f"held-out source (exposure) + the {PRODUCTION_MODEL_NAME}-map-vs-NDVI-proxy greenery disagreement "
+            f"(adaptive capacity) — NOT "
             f"the sensitivity pillar, whose uncertainty is formula choice, not noise (see the specification table "
             f"in the rank-impact section). Exposure noise is an upper bound (it also contains the held-out "
             f"footprint's mismatch with the subzone) and the greenery noise is a rough scale, so read the bands as "
