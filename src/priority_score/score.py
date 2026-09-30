@@ -13,6 +13,7 @@ from src.utils.geo import normalize
 def build_score(
     df: pd.DataFrame, exposure_col: str, weighting: str, seed: int = RANDOM_SEED,
     adaptive_capacity_col: str = "greenery_fraction", reference_df: pd.DataFrame = None,
+    weights: dict = None,
 ):
     """Build the cooling-priority score for one exposure (heat-layer) column.
     Sensitivity and adaptive-capacity deficit are held fixed — only the
@@ -50,6 +51,13 @@ def build_score(
     correlation with the other pillars. Standardising first keeps the weights
     stable (0.38 / 0.23 / 0.39 either way).
 
+    `weighting="custom"` takes the weights from `weights` (a dict keyed
+    exposure / sensitivity / adaptive_deficit, rescaled to sum to 1; a missing
+    key counts as 0) -- the Island Map's weight sliders, which let a viewer see
+    how far the top-N moves when the weights change. With a zero sensitivity
+    weight `sensitivity_raw` is never read, as in "heat_greenery", so the
+    all-places view's two sliders also cover subzones without one.
+
     The fitted PCA's sign — the sign
     of the fitted loadings is aligned to the exposure loading only, so a
     pillar whose loading disagrees with exposure can come out negative,
@@ -70,6 +78,19 @@ def build_score(
         # callers that read all three keep working.
         score = 0.5 * exposure_norm + 0.5 * adaptive_deficit_norm
         return score, {"exposure": 0.5, "sensitivity": 0.0, "adaptive_deficit": 0.5}
+
+    if weighting == "custom":
+        pillar_names = ("exposure", "sensitivity", "adaptive_deficit")
+        if not weights or set(weights) - set(pillar_names):
+            raise ValueError(f"weighting='custom' needs `weights` keyed by {pillar_names}, got {weights}.")
+        total = sum(weights.values())
+        if total <= 0 or any(w < 0 for w in weights.values()):
+            raise ValueError(f"Custom weights must be non-negative and not all zero, got {weights}.")
+        weights = {k: weights.get(k, 0.0) / total for k in pillar_names}
+        score = weights["exposure"] * exposure_norm + weights["adaptive_deficit"] * adaptive_deficit_norm
+        if weights["sensitivity"]:
+            score = score + weights["sensitivity"] * normalize(df["sensitivity_raw"], ref["sensitivity_raw"])
+        return score, weights
 
     sensitivity_norm = normalize(df["sensitivity_raw"], ref["sensitivity_raw"])
 
@@ -95,6 +116,6 @@ def build_score(
         weights = dict(zip(pillars.columns, weights_arr))
 
     else:
-        raise ValueError(f"Unknown weighting '{weighting}', expected 'pca', 'equal' or 'heat_greenery'.")
+        raise ValueError(f"Unknown weighting '{weighting}', expected 'pca', 'equal', 'heat_greenery' or 'custom'.")
 
     return score, weights

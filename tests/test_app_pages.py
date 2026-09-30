@@ -52,10 +52,48 @@ def test_all_places_view_loads():
     print("PASS: map and breakdown pages load in the all-places view, and TUAS NORTH is selectable there")
 
 
+def test_island_map_weight_sliders():
+    """Turning on the weight sliders and moving everything onto heat must
+    re-score the map and report how many top-N subzones changed."""
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "pages" / "2_Island_Map.py"), default_timeout=120)
+    at.session_state["priority_lens"] = "residents"
+    at.run()
+    at.toggle[0].set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.slider) == 3, f"expected 3 weight sliders, got {len(at.slider)}"
+    changed = at.metric[0].value
+    assert changed == "0", f"default slider weights should leave the top-N unchanged, got {changed}"
+    at.slider[1].set_value(0.0).run()
+    at.slider[2].set_value(0.0).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert int(at.metric[0].value) > 0, "heat-only weights should change the top-N"
+    print(f"PASS: weight sliders load, default weights change 0 of the top-N, heat-only changes {at.metric[0].value}")
+
+    color_radio = next(r for r in at.radio if r.label == "Color by")
+    color_radio.set_value("Top 20 only").run()
+    assert not at.exception, [e.value for e in at.exception]
+    at.toggle[0].set_value(False).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert next(r for r in at.radio if r.label == "Color by").value == "Top 20 only", "turning the sliders off must keep 'Top 20 only'"
+    print("PASS: 'Top 20 only' colour option draws with and without custom weights, and survives the slider toggle")
+
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "pages" / "2_Island_Map.py"), default_timeout=120)
+    at.session_state["priority_lens"] = "all_places"
+    at.run()
+    at.toggle[0].set_value(True).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.slider) == 2, f"all-places view should have 2 weight sliders, got {len(at.slider)}"
+    assert at.metric[0].value == "0", f"default all-places weights should change nothing, got {at.metric[0].value}"
+    at.slider[1].set_value(0.0).run()
+    assert not at.exception, [e.value for e in at.exception]
+    print(f"PASS: all-places view has 2 sliders, defaults change 0, heat-only changes {at.metric[0].value}")
+
+
 def main():
     for page_path in PAGES:
         test_page_loads_without_exception(page_path)
     test_all_places_view_loads()
+    test_island_map_weight_sliders()
     print("\nAll app page checks passed.")
 
 

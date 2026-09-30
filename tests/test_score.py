@@ -107,12 +107,44 @@ def test_heat_greenery_ignores_sensitivity_and_covers_unranked_subzones():
     print("PASS: heat_greenery = mean of exposure and greenery deficit, independent of sensitivity (incl. NaN / absent)")
 
 
+def test_custom_weights_reproduce_pca_and_are_rescaled():
+    """The Island Map sliders: feeding the PCA weights back in gives the PCA
+    score, and weights that don't sum to 1 are rescaled (x2 changes nothing)."""
+    df = _make_table()
+    pca_score, pca_weights = build_score(df, "lst_native30", "pca")
+    custom_score, _ = build_score(df, "lst_native30", "custom", weights=pca_weights)
+    assert np.allclose(pca_score, custom_score), "custom weights = PCA weights must reproduce the PCA score"
+    doubled, weights = build_score(df, "lst_native30", "custom", weights={k: 2 * v for k, v in pca_weights.items()})
+    assert np.allclose(pca_score, doubled) and np.isclose(sum(weights.values()), 1.0), "weights must be rescaled to sum to 1"
+    for bad in ({"exposure": 0, "sensitivity": 0, "adaptive_deficit": 0}, {"heat": 1}, {"exposure": -1, "adaptive_deficit": 2}, None):
+        try:
+            build_score(df, "lst_native30", "custom", weights=bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"custom weights {bad} should be rejected")
+    print("PASS: custom weights reproduce the PCA score, are rescaled to sum to 1, and bad weights are rejected")
+
+
+def test_custom_weights_without_sensitivity_match_heat_greenery():
+    """The all-places sliders: heat + greenery weights only, on a table where
+    sensitivity is NaN, reproduce the heat_greenery score and never go NaN."""
+    df = _make_table()
+    df.loc[:9, "sensitivity_raw"] = np.nan
+    expected, _ = build_score(df, "lst_native30", "heat_greenery")
+    score, weights = build_score(df, "lst_native30", "custom", weights={"exposure": 0.5, "adaptive_deficit": 0.5})
+    assert np.allclose(expected, score) and score.notna().all(), "two-pillar custom weights must equal heat_greenery"
+    assert weights["sensitivity"] == 0.0, f"missing sensitivity weight must count as 0, got {weights}"
+    print("PASS: custom heat + greenery weights reproduce the all-places score, with NaN sensitivity ignored")
+
+
 def main():
     test_pca_weights_sum_to_one_and_score_stays_on_unit_scale()
     test_identical_pillars_give_equal_weights()
     test_pca_weights_do_not_follow_pillar_skew()
     test_equal_weighting_is_unchanged()
     test_heat_greenery_ignores_sensitivity_and_covers_unranked_subzones()
+    test_custom_weights_reproduce_pca_and_are_rescaled()
+    test_custom_weights_without_sensitivity_match_heat_greenery()
     print("\nAll score.py checks passed.")
 
 
