@@ -113,6 +113,7 @@ def bootstrap_priority_score(
     exposure_noise_std: float, adaptive_capacity_noise_std: float,
     n_iterations: int = PRIORITY_SCORE_BOOTSTRAP_ITERATIONS, quantiles=PRIORITY_SCORE_BAND_QUANTILES,
     seed: int = RANDOM_SEED, adaptive_capacity_col: str = "greenery_fraction", top_n: int = TOP_N,
+    clip_greenery: bool = True,
 ) -> pd.DataFrame:
     """Perturbs exposure_col and adaptive_capacity_col with independent
     Gaussian noise (the two noise-model stds above) n_iterations times,
@@ -123,6 +124,13 @@ def bootstrap_priority_score(
     `top_n`. NaN/zero noise stds are treated as "no perturbation for this
     pillar" rather than raising -- lets a caller run with only one noise
     source wired up.
+
+    Perturbed greenery is clipped to [0, 1] (`clip_greenery`, the production
+    setting). For subzones with almost no vegetation the clip makes the noise
+    one-sided -- greenery can only go up -- which pulls their noisy scores
+    down. `clip_greenery=False` exists only to measure that effect
+    (scripts/evaluate_priority_score.py); it is small (noise floor 10.9 with
+    the clip, 11.3 without, on the 2026-10 production data).
     """
     rng = np.random.default_rng(seed)
     n = len(df)
@@ -138,9 +146,8 @@ def bootstrap_priority_score(
         if has_exposure_noise:
             perturbed[exposure_col] = perturbed[exposure_col] + rng.normal(0, exposure_noise_std, size=n)
         if has_adaptive_noise:
-            perturbed[adaptive_capacity_col] = (
-                perturbed[adaptive_capacity_col] + rng.normal(0, adaptive_capacity_noise_std, size=n)
-            ).clip(0, 1)
+            noisy = perturbed[adaptive_capacity_col] + rng.normal(0, adaptive_capacity_noise_std, size=n)
+            perturbed[adaptive_capacity_col] = noisy.clip(0, 1) if clip_greenery else noisy
         score, _weights = build_score(
             perturbed, exposure_col, weighting, seed=seed, adaptive_capacity_col=adaptive_capacity_col,
             reference_df=df,
