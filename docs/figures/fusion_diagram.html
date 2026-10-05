@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sensor Fusion Pipeline</title>
+<style>
+  :root {
+    --bg: #ffffff; --ink: #1d232b; --muted: #5b6573; --line: #b9c2cc;
+    --sat: #e8f0fb; --sat-edge: #7aa2d6; --open: #eef5ec; --open-edge: #86b07c;
+    --step: #fff4e8; --step-edge: #e08a2c; --out: #1f2a37; --out-ink: #ffffff; --accent: #c2410c;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+  .slide { position: relative; width: 1600px; height: 900px; padding: 44px 56px 36px; }
+  h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.3px; }
+  .sub { font-size: 17px; color: var(--muted); margin-top: 6px; }
+  .grid { position: relative; display: grid; grid-template-columns: 330px 1fr 330px; gap: 0 120px; margin-top: 30px; height: 650px; }
+  .col { display: flex; flex-direction: column; justify-content: space-between; position: relative; z-index: 1; }
+  .col-head { font-size: 13px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .card { border-radius: 10px; padding: 9px 14px; border: 1.5px solid; background: #fff; }
+  .card .t { font-size: 16.5px; font-weight: 650; }
+  .card .d { font-size: 13.5px; color: var(--muted); margin-top: 2px; line-height: 1.3; }
+  .res { float: right; font-size: 12.5px; font-weight: 700; padding: 1px 8px; border-radius: 99px; background: #fff; border: 1px solid currentColor; margin-left: 8px; }
+  .sat { background: var(--sat); border-color: var(--sat-edge); }
+  .sat .res { color: #2f5f9e; }
+  .open { background: var(--open); border-color: var(--open-edge); }
+  .open .res { color: #3f6f35; }
+  .step { background: var(--step); border-color: var(--step-edge); padding: 11px 16px 11px 58px; position: relative; }
+  .step .n { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 32px; height: 32px; border-radius: 50%; background: var(--step-edge); color: #fff; font-weight: 800; font-size: 17px; display: grid; place-items: center; }
+  .step.key { border-width: 2.5px; box-shadow: 0 0 0 4px #fde3c8; }
+  .out { background: var(--out); border-color: var(--out); color: var(--out-ink); }
+  .out .d { color: #c9d2dd; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 700; color: var(--accent); background: #fff; border-radius: 4px; padding: 0 6px; margin-left: 6px; vertical-align: 2px; }
+  svg.wires { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; overflow: visible; }
+  .foot { position: absolute; left: 56px; right: 56px; bottom: 30px; display: flex; gap: 28px; font-size: 14px; color: var(--muted); }
+  .foot b { color: var(--ink); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; border: 1.5px solid; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <h1>Sensor fusion: three satellites, ground stations and open data in five steps</h1>
+  <div class="sub">Every satellite layer comes from the same dry-season months (Apr, May, Oct, Nov, 2021–2026) on one 10 m UTM grid, so the sensors can be combined pixel for pixel.</div>
+
+  <div class="grid" id="grid">
+    <svg class="wires" id="wires"></svg>
+
+    <div class="col" id="sources">
+      <div class="col-head">Sensors &amp; open data</div>
+      <div class="card sat" id="landsat"><span class="res">30 m</span><div class="t">Landsat 8/9 thermal</div><div class="d">Land-surface temperature (heat)</div></div>
+      <div class="card sat" id="s2"><span class="res">10 m</span><div class="t">Sentinel-2</div><div class="d">6 visible/infrared bands + greenness, built-up, water indices</div></div>
+      <div class="card sat" id="dw"><span class="res">10 m</span><div class="t">Google Dynamic World</div><div class="d">Land-cover training labels</div></div>
+      <div class="card sat" id="modis"><span class="res">1 km</span><div class="t">MODIS (Terra) thermal</div><div class="d">Independent satellite heat</div></div>
+      <div class="card open" id="nea"><span class="res">stations</span><div class="t">NEA weather stations</div><div class="d">Ground air temperature</div></div>
+      <div class="card open" id="pop"><span class="res">subzone</span><div class="t">SingStat + URA</div><div class="d">Residents, elderly share; subzone boundaries</div></div>
+    </div>
+
+    <div class="col" id="steps">
+      <div class="col-head">Fusion steps</div>
+      <div class="card step key" id="f1"><span class="n">1</span><div class="t">Heat downscaling <span class="tag">KEY FUSION</span></div><div class="d">Learn heat ~ greenness/built-up/water from Landsat + Sentinel-2 at 30 m, apply at 10 m, then correct back to Landsat's 30 m values (TsHARP-style)</div></div>
+      <div class="card step" id="f2"><span class="n">2</span><div class="t">Land-cover classification (U-Net)</div><div class="d">Sentinel-2 bands trained on Dynamic World labels → 10 m greenery map, 81.4% accurate</div></div>
+      <div class="card step" id="f3"><span class="n">3</span><div class="t">Per-subzone score</div><div class="d">Heat + vulnerable residents + missing greenery, averaged per subzone, data-derived (PCA) weights</div></div>
+      <div class="card step" id="f4"><span class="n">4</span><div class="t">Cross-sensor heat model (XGBoost)</div><div class="d">Sentinel-2 land cover + population predict Landsat heat → greening what-if</div></div>
+      <div class="card step key" id="f5"><span class="n">5</span><div class="t">Sensor disagreement → uncertainty <span class="tag">NOVEL</span></div><div class="d">How far MODIS disagrees with Landsat sets the heat-noise level for the confidence bands; NEA stations cross-check</div></div>
+    </div>
+
+    <div class="col" id="outputs">
+      <div class="col-head">What it produces</div>
+      <div class="card out" id="o1"><div class="t">10 m heat map</div><div class="d">Which blocks inside a subzone to cool</div></div>
+      <div class="card out" id="o2"><div class="t">Cooling-priority score</div><div class="d">211 residential subzones ranked</div></div>
+      <div class="card out" id="o3"><div class="t">Greening what-if</div><div class="d">Predicted cooling from more greenery</div></div>
+      <div class="card out" id="o4"><div class="t">Confidence bands</div><div class="d">Chance each subzone is in the top 20; noise alone changes ~11 of 20</div></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="legend"><i style="background:var(--sat);border-color:var(--sat-edge)"></i>Satellite sensor</span>
+    <span class="legend"><i style="background:var(--open);border-color:var(--open-edge)"></i>Ground / open data</span>
+    <span class="legend"><i style="background:var(--step);border-color:var(--step-edge)"></i>Fusion step</span>
+    <span style="margin-left:auto">Resolutions span <b>1 km → 30 m → 10 m → subzone</b></span>
+  </div>
+</div>
+
+<script>
+  // Wires: source -> step, step -> output. Drawn after layout from the cards' real positions.
+  const links = [
+    ["landsat", "f1"], ["s2", "f1"],
+    ["s2", "f2"], ["dw", "f2"],
+    ["landsat", "f3"], ["pop", "f3"], ["f2", "f3"],
+    ["landsat", "f4"], ["s2", "f4"], ["pop", "f4"],
+    ["landsat", "f5"], ["modis", "f5"], ["nea", "f5"],
+    ["f1", "o1"], ["f3", "o2"], ["f4", "o3"], ["f5", "o4"], ["f3", "o4"],
+  ];
+  const grid = document.getElementById("grid");
+  const svg = document.getElementById("wires");
+  const g = grid.getBoundingClientRect();
+  const colour = { landsat: "#7aa2d6", s2: "#7aa2d6", dw: "#7aa2d6", modis: "#7aa2d6", nea: "#86b07c", pop: "#86b07c" };
+  const ns = "http://www.w3.org/2000/svg";
+  for (const [a, b] of links) {
+    const ra = document.getElementById(a).getBoundingClientRect();
+    const rb = document.getElementById(b).getBoundingClientRect();
+    const sameCol = a.startsWith("f") && b.startsWith("f");
+    let d;
+    if (sameCol) {  // step 2 -> step 3: a short loop on the left edge of the middle column
+      const x = ra.left - g.left, y1 = ra.top + ra.height * 0.7 - g.top, y2 = rb.top + rb.height * 0.3 - g.top;
+      d = `M ${x} ${y1} C ${x - 40} ${y1}, ${x - 40} ${y2}, ${x} ${y2}`;
+    } else {
+      const x1 = ra.right - g.left, y1 = ra.top + ra.height / 2 - g.top;
+      const x2 = rb.left - g.left, y2 = rb.top + rb.height / 2 - g.top;
+      const mx = (x1 + x2) / 2;
+      d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+    }
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", colour[a] || "#e08a2c");
+    path.setAttribute("stroke-width", a === "landsat" || a === "s2" ? 2.2 : 1.8);
+    path.setAttribute("opacity", 0.85);
+    svg.appendChild(path);
+  }
+</script>
+</body>
+</html>
