@@ -131,6 +131,7 @@ fig2.update_layout(
     xaxis_title="Contribution to priority score", yaxis=dict(autorange="reversed"),
     legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, traceorder="reversed"),
 )
+fig2.update_yaxes(automargin=True)
 st.plotly_chart(fig2, width="stretch")
 st.caption(
     "Each bar is the pillar's 0–1 value times its weight ("
@@ -170,6 +171,7 @@ else:
         xaxis_title="Priority score (p05 – median – p95)",
         yaxis=dict(categoryorder="array", categoryarray=window["label"].tolist(), autorange="reversed"),
     )
+    fig.update_yaxes(automargin=True)
     st.plotly_chart(fig, width="stretch")
     st.caption(
         f"Each line spans the middle 90% of bootstrap draws for that subzone; overlapping lines mean their order "
