@@ -1,9 +1,8 @@
 """S7 island-wide interactive map. Loads the URA subzone GeoJSON (already
 cached locally, no GEE call needed to view it) + priority_score.csv (and
 the confidence-band CSV, if built) and renders a folium choropleth,
-matching the map conventions already established in
-app/pages/1_Label_Validation_Points.py (Esri-style basemap, folium +
-streamlit-folium). Click a subzone, then jump to its breakdown page.
+on a light Esri World Gray Canvas basemap (no API key needed) (folium + streamlit-folium, as in
+app/pages/1_Label_Validation_Points.py). Click a subzone, then jump to its breakdown page.
 In the residents view, three weight sliders (heat / vulnerable residents /
 missing greenery) re-score the map live and count how many of the top-N move
 compared with the measurement-noise floor.
@@ -25,6 +24,7 @@ from streamlit_folium import st_folium
 from config.settings import (
     MIN_RESIDENTS_FOR_RANKING, PROCESSED_DIR, REFERENCE_VARIANT, SG_CENTER, SUBZONE_ID_PROPERTY, TOP_N,
 )
+from app.ui import PILLAR_LABELS, subzone_name
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 from src.priority_score.io import load_and_join
 from src.priority_score.lenses import DEFAULT_LENS, LENSES
@@ -65,17 +65,13 @@ def load_map_data(score_path: str, bands_path: str):
     if Path(bands_path).exists():
         bands_df = pd.read_csv(bands_path)
         merged = merged.merge(bands_df, on="subzone_id", how="left")
-        if P_TOP_COL in merged.columns:
-            merged[P_TOP_COL] = merged[P_TOP_COL].round(2)
+    merged["subzone_name"] = merged[SUBZONE_ID_PROPERTY].map(subzone_name)
     return merged
 
 
 gdf = load_map_data(str(PRIORITY_SCORE_PATH), str(BANDS_PATH))
 saved_score_range = (float(gdf["priority_score"].min()), float(gdf["priority_score"].max()))
 saved_top = set(gdf[gdf["priority_score"].notna()].nlargest(TOP_N, "priority_score")["subzone_id"])
-
-PILLAR_LABELS = {"exposure": "Heat", "sensitivity": "Vulnerable residents", "adaptive_deficit": "Missing greenery"}
-
 
 @st.cache_data
 def load_pillar_table(lens_key: str):
@@ -151,7 +147,10 @@ with weights_panel:
                 f"Beyond measurement noise — these weights move more of the top {TOP_N} than the data's own uncertainty does."
             )
         if entered:
-            st.caption(f"Enter the top {TOP_N}: {', '.join(entered)}. Leave: {', '.join(left)}.")
+            st.caption(
+                f"Enter the top {TOP_N}: {', '.join(map(subzone_name, entered))}. "
+                f"Leave: {', '.join(map(subzone_name, left))}."
+            )
 
 has_bands = "band_width" in gdf.columns
 
@@ -196,34 +195,48 @@ show_top_only = value_col == "top_status"
 draw_col = "priority_score" if show_top_only else value_col
 
 plot_gdf = gdf[gdf[draw_col].notna()].copy()
-n_missing = len(gdf) - len(plot_gdf)
-if n_missing:
-    reason = (
-        f" Subzones with fewer than {MIN_RESIDENTS_FOR_RANKING} residents (parks, reserves, industrial estates) are not "
-        f"ranked in this view, because a resident-based sensitivity can't be estimated for them; switch to "
-        f"'{LENSES['all_places']['label']}' to see them."
-        if lens_key == "residents" else ""
+# Subzones with no value are still drawn, in flat grey, with a tooltip saying
+# why, so the gaps in the map explain themselves. In the residents view these
+# are the subzones under MIN_RESIDENTS_FOR_RANKING residents (parks, reserves,
+# industrial estates), whose resident-based sensitivity can't be estimated.
+no_value_gdf = gdf[gdf[draw_col].isna()].copy()
+not_ranked_label = f"Not ranked (fewer than {MIN_RESIDENTS_FOR_RANKING} residents)"
+no_value_gdf["no_value_reason"] = (
+    not_ranked_label if lens_key == "residents" and draw_col == "priority_score"
+    else f"No value for '{color_by}'"
+)
+if lens_key == "residents":
+    no_value_gdf.loc[no_value_gdf["priority_score"].isna(), "no_value_reason"] = not_ranked_label
+if len(no_value_gdf):
+    st.caption(
+        f"{len(no_value_gdf)} subzone(s) in grey have no value here — hover one to see why."
+        + (f" Switch to '{LENSES['all_places']['label']}' to rank them too." if lens_key == "residents" else "")
     )
-    st.caption(f"{n_missing} subzone(s) are not drawn: they have no value for '{"Priority score" if show_top_only else color_by}'.{reason}")
 
 # The priority score is always coloured on the SAVED score's range, so moving
 # the weight sliders changes a subzone's colour only when its score changes
 # (scores outside that range take the end colours).
 vmin, vmax = saved_score_range if draw_col == "priority_score" else (
     float(plot_gdf[draw_col].min()), float(plot_gdf[draw_col].max()))
-colormap = cm.linear.YlOrRd_09.scale(vmin, vmax)
+# Uncertainty gets its own palette, so a wide band never reads as "high priority".
+palette = cm.linear.Purples_09 if draw_col == "band_width" else cm.linear.YlOrRd_09
+colormap = palette.scale(vmin, vmax)
 colormap.caption = color_by
 
-tooltip_fields = [SUBZONE_ID_PROPERTY, "rank_label", "priority_score"]
+# Tooltip copies, formatted for reading; the raw columns stay numeric for colouring.
+plot_gdf["score_label"] = plot_gdf["priority_score"].map(lambda v: f"{v:.2f}" if pd.notna(v) else "–")
+tooltip_fields = ["subzone_name", "rank_label", "score_label"]
 tooltip_aliases = ["Subzone", "Rank", "Priority score"]
 if show_top_only:
     tooltip_fields.append("top_status")
     tooltip_aliases.append(f"Top {TOP_N}")
 if has_bands:
-    tooltip_fields.append("band_width")
+    plot_gdf["band_label"] = plot_gdf["band_width"].map(lambda v: f"{v:.2f}" if pd.notna(v) else "–")
+    tooltip_fields.append("band_label")
     tooltip_aliases.append("Band width (p95-p05)")
 if P_TOP_COL in gdf.columns:
-    tooltip_fields.append(P_TOP_COL)
+    plot_gdf["p_top_label"] = plot_gdf[P_TOP_COL].map(lambda v: f"{v:.0%}" if pd.notna(v) else "–")
+    tooltip_fields.append("p_top_label")
     tooltip_aliases.append(f"Chance of top-{TOP_N}")
 
 
@@ -244,7 +257,7 @@ def _style(feature):
 # The subzones go in a FeatureGroup passed separately, so a slider move swaps
 # only that layer: the base map (and its zoom/pan) stays put. The key changes
 # with the view and colour option, whose legend lives on the base map.
-m = folium.Map(location=SG_CENTER, zoom_start=11, tiles="OpenStreetMap")
+m = folium.Map(location=SG_CENTER, zoom_start=11, tiles="Esri.WorldGrayCanvas")
 if show_top_only:
     shown = [s for s in TOP_STATUS_STYLE if (s == f"In top {TOP_N}") == (custom_weights is None)]
     st.markdown(" &nbsp; ".join(
@@ -259,6 +272,12 @@ folium.GeoJson(
     plot_gdf.__geo_interface__, style_function=_style,
     tooltip=folium.GeoJsonTooltip(fields=tooltip_fields, aliases=tooltip_aliases),
 ).add_to(subzone_layer)
+if len(no_value_gdf):
+    folium.GeoJson(
+        no_value_gdf[["subzone_name", "no_value_reason", "geometry"]].__geo_interface__,
+        style_function=lambda _feature: {"fillColor": "#d9d9d9", "fillOpacity": 0.55, "color": "#9e9e9e", "weight": 0.5},
+        tooltip=folium.GeoJsonTooltip(fields=["subzone_name", "no_value_reason"], aliases=["Subzone", "Status"]),
+    ).add_to(subzone_layer)
 
 map_state = st_folium(
     m, key=f"island_map_{lens_key}_{value_col}", feature_group_to_add=subzone_layer,
@@ -267,26 +286,31 @@ map_state = st_folium(
 
 clicked = map_state.get("last_active_drawing")
 if clicked:
+    # Grey no-value subzones carry only a name and reason, no SUBZONE_ID_PROPERTY,
+    # so clicking one doesn't select it (it has no breakdown to show).
     clicked_id = clicked.get("properties", {}).get(SUBZONE_ID_PROPERTY)
     if clicked_id:
         st.session_state["selected_subzone_id"] = clicked_id
 
 with st.expander(f"Top {TOP_N} subzones in this view"):
     top_table = gdf[gdf["priority_score"].notna()].sort_values("priority_score", ascending=False).head(TOP_N)
-    top_cols = ["subzone_id", "priority_score"] + ([P_TOP_COL] if P_TOP_COL in top_table.columns else [])
+    top_cols = ["subzone_name", "priority_score"] + ([P_TOP_COL] if P_TOP_COL in top_table.columns else [])
     if custom_weights is not None:
         top_cols.append("top_status")
     st.dataframe(
-        top_table[top_cols].rename(columns={
-            "subzone_id": "Subzone", "priority_score": "Priority score", P_TOP_COL: f"Chance of top-{TOP_N}",
+        top_table[top_cols], hide_index=True, use_container_width=True,
+        column_config={
+            "subzone_name": "Subzone",
+            "priority_score": st.column_config.NumberColumn("Priority score", format="%.2f"),
+            P_TOP_COL: st.column_config.ProgressColumn(
+                f"Chance of top-{TOP_N}", min_value=0.0, max_value=1.0, format="percent"),
             "top_status": "vs saved weights",
-        }),
-        hide_index=True, use_container_width=True,
+        },
     )
 
 selected = st.session_state.get("selected_subzone_id")
 if selected:
-    st.success(f"Selected subzone: **{selected}**")
+    st.success(f"Selected subzone: **{subzone_name(selected)}**")
     if st.button("View subzone breakdown →", type="primary"):
         st.switch_page("pages/3_Subzone_Breakdown.py")
 else:

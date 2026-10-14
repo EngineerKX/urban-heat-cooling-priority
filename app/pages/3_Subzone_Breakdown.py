@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config.settings import PROCESSED_DIR, REFERENCE_VARIANT, TOP_N
+from app.ui import CLUSTER_NAMES, LANDCOVER_COLORS, LANDCOVER_LABELS, PILLAR_COLORS, PILLAR_LABELS, cluster_name, subzone_name
 from src.priority_score.io import load_and_join
 from src.priority_score.lenses import DEFAULT_LENS, LENSES
 from src.priority_score.score import build_score
@@ -60,7 +61,9 @@ selected = st.session_state.get("selected_subzone_id")
 if selected not in subzone_ids:
     selected = None
 
-chosen = st.selectbox("Subzone", subzone_ids, index=subzone_ids.index(selected) if selected else 0)
+chosen = st.selectbox(
+    "Subzone", subzone_ids, index=subzone_ids.index(selected) if selected else 0, format_func=subzone_name,
+)
 st.session_state["selected_subzone_id"] = chosen
 if selected is None:
     st.caption("No subzone was pre-selected from the map — pick one above, or go to **Island Map** and click one.")
@@ -69,8 +72,8 @@ row = df[df["subzone_id"] == chosen].iloc[0]
 idx = row.name
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Priority score", f"{row['priority_score']:.3f}")
-col2.metric("Exposure (LST)", f"{row[REFERENCE_VARIANT]:.1f}°C")
+col1.metric("Priority score", f"{row['priority_score']:.2f}")
+col2.metric("Land surface temperature", f"{row[REFERENCE_VARIANT]:.1f}°C")
 col3.metric("Greenery fraction", f"{row['greenery_fraction']:.2f}")
 if "population_total" in row.index and pd.notna(row["population_total"]):
     col4.metric("Residents", f"{int(row['population_total']):,}")
@@ -109,12 +112,15 @@ else:
 
 st.subheader("Pillar contribution")
 pillar_norms = {
-    "Exposure": (normalize(df[REFERENCE_VARIANT]), weights["exposure"], "#2f6fed"),
-    "Sensitivity": (normalize(df["sensitivity_raw"]), weights["sensitivity"], "#f2994a"),
-    "Adaptive deficit": (normalize(1 - df["greenery_fraction"]), weights["adaptive_deficit"], "#27ae60"),
+    PILLAR_LABELS[key]: (norm, weights[key], PILLAR_COLORS[key])
+    for key, norm in (
+        ("exposure", normalize(df[REFERENCE_VARIANT])),
+        ("sensitivity", normalize(df["sensitivity_raw"])),
+        ("adaptive_deficit", normalize(1 - df["greenery_fraction"])),
+    )
 }
 if lens["weighting"] == "heat_greenery":
-    pillar_norms.pop("Sensitivity")  # the all-places view has no sensitivity term (and no value for small subzones)
+    pillar_norms.pop(PILLAR_LABELS["sensitivity"])  # the all-places view has no sensitivity term (and no value for small subzones)
 
 pillar_names = list(pillar_norms)
 pillar_values = [norm.loc[idx] for norm, _w, _c in pillar_norms.values()]
@@ -124,7 +130,7 @@ PILLAR_COLORS = [c for _norm, _w, c in pillar_norms.values()]  # fixed colour pe
 
 fig2 = go.Figure(go.Bar(
     x=pillar_contribution, y=pillar_names, orientation="h", marker_color=PILLAR_COLORS,
-    text=[f"{v:.3f} (weight={w:.2f})" for v, w in zip(pillar_contribution, pillar_weights)], textposition="auto",
+    text=[f"{v:.2f} (weight {w:.0%})" for v, w in zip(pillar_contribution, pillar_weights)], textposition="auto",
 ))
 fig2.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=30), xaxis_title="Weighted contribution to priority score")
 st.plotly_chart(fig2, use_container_width=True)
@@ -137,16 +143,21 @@ if HOTSPOT_CLUSTERS_PATH.exists():
         st.subheader("Land cover & hotspot typology")
         lc_col, cl_col = st.columns(2)
         with lc_col:
-            classes = ["vegetation", "built_up", "bare", "water"]
-            LC_COLORS = {"vegetation": "#27ae60", "built_up": "#8c8c8c", "bare": "#c9a35d", "water": "#2f80ed"}
+            classes = list(LANDCOVER_LABELS)
             lc_fig = go.Figure(go.Bar(
-                x=classes, y=[hs[f"fraction_{c}"] for c in classes],
-                marker_color=[LC_COLORS[c] for c in classes],
+                x=[LANDCOVER_LABELS[c] for c in classes], y=[hs[f"fraction_{c}"] for c in classes],
+                marker_color=[LANDCOVER_COLORS[c] for c in classes],
             ))
-            lc_fig.update_layout(height=260, margin=dict(l=10, r=10, t=10, b=30), yaxis_title="Fraction of subzone area")
+            lc_fig.update_layout(
+                height=260, margin=dict(l=10, r=10, t=10, b=30), yaxis_title="Share of subzone area", yaxis_tickformat=".0%",
+            )
             st.plotly_chart(lc_fig, use_container_width=True)
         with cl_col:
-            st.metric("Hotspot cluster", f"Cluster {int(hs['primary_cluster'])} ({hs['primary_cluster_method']})")
+            st.metric(
+                "Hotspot type", cluster_name(hs["primary_cluster"]),
+                help=f"Cluster {int(hs['primary_cluster'])} of {len(CLUSTER_NAMES)} "
+                     f"({hs['primary_cluster_method']} on dry/wet-season LST, NDVI and NDBI).",
+            )
             st.metric("Dry-season LST", f"{hs['lst_dry']:.1f}°C")
             st.metric("Wet-season LST", f"{hs['lst_wet']:.1f}°C")
             st.caption("See the Validation Dashboard page for cluster-quality metrics and the land-cover coherence check.")

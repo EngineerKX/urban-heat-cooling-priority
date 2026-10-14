@@ -19,6 +19,7 @@ from streamlit.testing.v1 import AppTest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PAGES = [
     REPO_ROOT / "app" / "Home.py",
+    REPO_ROOT / "app" / "overview.py",
     REPO_ROOT / "app" / "pages" / "1_Label_Validation_Points.py",
     REPO_ROOT / "app" / "pages" / "2_Island_Map.py",
     REPO_ROOT / "app" / "pages" / "3_Subzone_Breakdown.py",

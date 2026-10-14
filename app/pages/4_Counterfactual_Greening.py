@@ -35,6 +35,7 @@ from config.settings import (
     UNET_PATCH_SIZE,
 )
 from src.heat_model.tabular import build_xgb_training_table, fit_index_landcover_model, predict_counterfactual_subzone
+from app.ui import subzone_name
 from src.ingest.subzones import as_geodataframe, fetch_subzones_geojson
 from src.ingest.worldcover import BUCKET_NAMES
 
@@ -72,7 +73,8 @@ else:
     subzone_ids = sorted(xgb_df["subzone_id"].astype(str).unique())
     preselected = st.session_state.get("selected_subzone_id")
     default_idx = subzone_ids.index(preselected) if preselected in subzone_ids else 0
-    chosen = st.selectbox("Subzone", subzone_ids, index=default_idx, key="cf_subzone_select")
+    chosen = st.selectbox("Subzone", subzone_ids, index=default_idx, format_func=subzone_name)
+    st.session_state["selected_subzone_id"] = chosen  # carry the choice back to the map and breakdown pages
 
     row_df = xgb_df[xgb_df["subzone_id"] == chosen]
     current_veg = float(row_df["fraction_vegetation"].iloc[0])
@@ -118,7 +120,7 @@ else:
     from src.heat_model.cnn_infer import load_cnn_regressor, locate_patch_and_pixel
     from src.heat_model.counterfactual import class_mean_feature_vectors, rescale_subzone_delta, run_patch_counterfactual
 
-    @st.cache_resource
+    @st.cache_resource(show_spinner="Loading the CNN and its ~1,000 image patches (one-time, can take ~30 s)…")
     def load_cnn_assets():
         """Reads all ~1000 patches + reprojects the land-cover/LST rasters onto
         each -- a real one-time cost (tens of seconds), so cached per session
@@ -139,7 +141,7 @@ else:
 
     match = subzones_utm[subzones_utm[SUBZONE_ID_PROPERTY] == chosen]
     if match.empty:
-        st.warning(f"'{chosen}' not found in the subzones geodataframe — can't locate its centroid.")
+        st.warning(f"'{subzone_name(chosen)}' not found in the subzones geodataframe — can't locate its centroid.")
     else:
         centroid_utm = match.geometry.centroid.iloc[0]
         centroid_lonlat = gpd.GeoSeries([centroid_utm], crs=S2_UTM_CRS).to_crs("EPSG:4326").iloc[0]
@@ -148,7 +150,7 @@ else:
 
         patch_idx, local_row, local_col = locate_patch_and_pixel(lon, lat, CNN_MIXER_JSON_PATH, UNET_PATCH_SIZE)
         if not (0 <= patch_idx < X.shape[0]):
-            st.warning(f"'{chosen}'s centroid falls outside the CNN patch grid — no live example available for it.")
+            st.warning(f"'{subzone_name(chosen)}'s centroid falls outside the CNN patch grid — no live example available for it.")
         else:
             radius_m = st.slider("Edit radius around subzone centroid (m)", 10.0, 200.0, 50.0, step=10.0)
             target_class_name = st.selectbox("Convert edited area to", list(BUCKET_NAMES.values()), index=0)
@@ -174,7 +176,7 @@ else:
                 rescaled = rescale_subzone_delta(cnn_result["mean_delta_lst_in_edit_area"], edit_area_m2, subzone_area_m2)
                 st.caption(
                     f"Naive area-weighted subzone-wide equivalent: {rescaled:+.4f}°C "
-                    f"(edited area is {edit_area_m2 / subzone_area_m2 * 100:.3f}% of {chosen}'s area). "
+                    f"(edited area is {edit_area_m2 / subzone_area_m2 * 100:.3f}% of {subzone_name(chosen)}'s area). "
                     "Cross-check against the XGBoost result above — same sign expected, not the same magnitude "
                     "(these operate at very different spatial scales)."
                 )
