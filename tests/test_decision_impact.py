@@ -134,6 +134,15 @@ def test_summary_flags_only_choices_above_the_noise_floor():
     assert by_choice.loc["Heat-map resolution (30 m vs downscaled 10 m)", "top_changed_max"] == 1
     print("PASS: summary sorts choices by impact and flags exactly those that exceed the noise floor")
 
+    # The land-cover label follows the table's reference map (production is now U-Net, not hybrid).
+    swap_unet = pd.DataFrame({
+        "greenery_source": ["U-Net", "RF", "hybrid", "NDVI proxy"], "is_reference": [True, False, False, False],
+        f"top{TOP_N}_changed": [0, 3, 1, 6],
+    })
+    summary = build_decision_impact_summary(weighting, rank_impact, spec, swap_unet, bands, top_n=TOP_N)
+    assert "Land-cover source (RF / hybrid / NDVI proxy vs U-Net)" in set(summary["choice"]), list(summary["choice"])
+    print("PASS: the land-cover row's label names the reference map from the table")
+
 
 def test_summary_says_so_when_no_alternative_changes_anything():
     """idxmax on an all-zero column returns the first label, which would read as
