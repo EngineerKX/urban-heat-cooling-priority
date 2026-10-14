@@ -90,11 +90,38 @@ def test_island_map_weight_sliders():
     print(f"PASS: all-places view has 2 sliders, defaults change 0, heat-only changes {at.metric[0].value}")
 
 
+def test_island_map_details_panel():
+    """The panel beside the map lists the top N until a subzone is picked;
+    picking one from the search box shows its rank and a Details button, and
+    "Show the top N" goes back to the list. (A map click can't be simulated
+    here; it goes through the same selected_subzone_id state.)"""
+    at = AppTest.from_file(str(REPO_ROOT / "app" / "pages" / "2_Island_Map.py"), default_timeout=120)
+    at.session_state["priority_lens"] = "residents"
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.dataframe) == 1, "with nothing selected, the panel should show the top-N list"
+
+    search = next(s for s in at.selectbox if s.label == "Find a subzone")
+    search.set_value("LITTLE INDIA").run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["selected_subzone_id"] == "LITTLE INDIA"
+    panel_text = " ".join(md.value for md in at.markdown)
+    assert "Little India" in panel_text and "Rank **2 of" in panel_text, "panel should show the picked subzone's rank"
+    assert any(b.label == "Details" for b in at.button), "panel should offer a Details button"
+    assert len(at.dataframe) == 0, "the top-N list should give way to the subzone's details"
+
+    next(b for b in at.button if b.label == "Show the top 20").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["selected_subzone_id"] is None and len(at.dataframe) == 1, "should be back on the list"
+    print("PASS: map details panel shows the top-N list, a searched subzone's rank and Details, and returns to the list")
+
+
 def main():
     for page_path in PAGES:
         test_page_loads_without_exception(page_path)
     test_all_places_view_loads()
     test_island_map_weight_sliders()
+    test_island_map_details_panel()
     print("\nAll app page checks passed.")
 
 
