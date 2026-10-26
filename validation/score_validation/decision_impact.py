@@ -69,8 +69,11 @@ def build_decision_impact_summary(
         ~spec_df["specification"].str.startswith("PRODUCTION") & (spec_df["spearman_vs_production"] < 1 - 1e-12)
     ].reset_index(drop=True)
 
-    # Land-cover source: every greenery source except the reference.
+    # Land-cover source: every greenery source except the reference. The label
+    # is built from the table, so it follows whichever map is the reference.
     alt_swap = swap_df[~swap_df["is_reference"]].reset_index(drop=True)
+    reference = " / ".join(swap_df.loc[swap_df["is_reference"], "greenery_source"].astype(str))
+    swap_label = f"Land-cover source ({' / '.join(alt_swap['greenery_source'].astype(str))} vs {reference})"
 
     rows = []
     if len(weighting_changed):
@@ -81,8 +84,7 @@ def build_decision_impact_summary(
     if len(alt_specs):
         rows.append(_row("Sensitivity formula", alt_specs[f"top{top_n}_changed"], alt_specs["specification"], floor, top_n))
     if len(alt_swap):
-        rows.append(_row("Land-cover source (RF / U-Net / NDVI proxy vs hybrid)", alt_swap[f"top{top_n}_changed"],
-                         alt_swap["greenery_source"], floor, top_n))
+        rows.append(_row(swap_label, alt_swap[f"top{top_n}_changed"], alt_swap["greenery_source"], floor, top_n))
 
     summary = pd.DataFrame(rows).sort_values("top_changed_max", ascending=False, kind="stable").reset_index(drop=True)
     noise_row = pd.DataFrame([{
