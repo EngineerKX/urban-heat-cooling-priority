@@ -1,7 +1,86 @@
-# Setup guide
+# CoolPriority SG
 
-One-time setup for a new machine/teammate after cloning this repo. Follow
+An AI-driven cooling-priority ranking for Singapore's URA subzones
+(ISY5002 Pattern Recognition Systems practice module, Group 28). It combines
+Landsat surface temperature, Sentinel-2 imagery, a U-Net land-cover map and
+SingStat census data into one priority score per subzone, gives each rank a
+90% confidence band, and lets planners test what added greenery might do to
+surface temperature. A Streamlit app presents the map, per-subzone
+breakdowns, the greening what-if tool and the validation results.
+
+## Download the full project (code + datasets)
+
+The datasets and trained models are too large for git (about 7 GB), so the
+complete project, including every dataset the app needs, is shared as a
+single zip:
+
+**[Download the full project (zip)](PASTE_GOOGLE_DRIVE_LINK_HERE)**
+
+The zip contains this repository plus the folders git doesn't track:
+`data/` (raw inputs, processed layers, scores, confidence bands, clusters),
+`models/` (trained U-Net, CNN and XGBoost) and `mlruns/` + `mlflow.db`
+(experiment history). It does **not** contain any credentials.
+
+## Quick start: run the app from the zip
+
+You don't need a Google Earth Engine or Google Cloud account for this —
+the app reads only the files in the zip.
+
+1. **Install Python 3.11 or newer** (we used 3.13).
+2. **Unzip to a short path**, e.g. `C:\coolpriority`. Windows can fail on
+   very long file paths, and some files sit several folders deep.
+3. **Create a fresh virtual environment and install the packages.** Open a
+   terminal in the unzipped folder:
+   ```
+   python -m venv .venv
+   .venv\Scripts\activate          # Windows
+   source .venv/bin/activate       # macOS/Linux
+   pip install -r requirements.txt
+   ```
+   (PowerShell blocking activation? See the gotcha in §2b below.)
+4. **Run the app:**
+   ```
+   python -m streamlit run app/Home.py
+   ```
+   It opens at `http://localhost:8501`. Stop it with **Ctrl+C** in the
+   terminal.
+
+Where to start: the **Overview** page summarises the findings; **Island
+Map**, **Subzone Breakdown** and **Counterfactual Greening** are the
+planner tools; **Validation Dashboard** holds the evaluation results. The
+first visit to Counterfactual Greening takes about a minute while the CNN
+loads its image patches.
+
+To *re-run parts of the pipeline* from the zip (not needed just to use the
+app), you'll need your own Earth Engine credentials — see
+`TEAMMATE_SETUP.md`, which covers working from a full folder copy.
+
+---
+
+# Full setup: rebuilding the pipeline from scratch
+
+Everything below is only needed if you start from a plain `git clone`
+(without the zip) or want to regenerate the datasets yourself. Follow it
 top to bottom.
+
+> **Reproducibility note.** Following this guide rebuilds the full pipeline
+> and gives results that are *consistent with*, but not *identical to*, the
+> numbers in our final report. Seeds are fixed (`RANDOM_SEED = 42`), the
+> satellite date window is fixed (to `2026-07-01`) and the hand-labelled
+> validation sample is in git, but:
+> - the U-Net and CNN train on Colab GPUs, which are not bit-for-bit
+>   deterministic, so retrained weights — and the land-cover map, greenery
+>   pillar and ranks built from them — differ slightly between runs;
+> - a few packages in `requirements.txt` (`tensorflow`, `mlflow`, `folium`,
+>   `matplotlib`, `streamlit-folium`) are unpinned, so a later install may
+>   pick up newer versions;
+> - Earth Engine collections (Landsat, Sentinel-2, Dynamic World) are
+>   occasionally reprocessed by their providers.
+>
+> Expect metrics such as land-cover accuracy to move by a point or so and a
+> few top-20 subzones to swap. Our evaluation shows measurement noise alone
+> swaps about 11 of the top 20, so differences of this size do not change
+> the project's conclusions.
 
 ## 1. Prerequisites
 
@@ -178,10 +257,9 @@ propagate, then retry.
 This pulls a real Earth Engine composite, checks the NEA weather-station
 API, runs an end-to-end smoke test (tile download → downscaling → toy
 land cover → subzone join → dummy score), and a downscaling sanity check.
-All five gates should PASS if steps 1-5 above are correct — G5 (labeling
-agreement) uses placeholder example labels until you and your teammate do
-the real joint-labeling exercise, so ignore that particular result until
-then.
+All five gates should PASS if steps 1-5 above are correct. G5 (labeling
+agreement) scores the real labels from the team's joint-labeling session
+(kappa 0.676).
 
 ## 7. Optional: Cloud Storage bucket
 
@@ -192,38 +270,42 @@ GCP project (Cloud Storage → Buckets → Create), then set `GEE_EXPORT_BUCKET`
 in `.env` to its name. The same bucket doubles as the model-artifact sync
 target (`GCS_MODEL_BUCKET`, defaults to reusing this one — see `.env.example`).
 
-## 8. Land-cover baseline: Random Forest
+## 8. Land-cover comparison model: Random Forest
 
-Before touching U-Net/CNN at all, the Random Forest classifier needs to
-exist locally — it's a hard prerequisite for the land-cover hybrid
-(§9d below combines RF's + U-Net's probability rasters), and it's
-simpler to get running first since it needs no GPU, no Colab, and trains
-server-side on Earth Engine in a couple of minutes.
+The production land-cover model is the **U-Net** (§9,
+`LANDCOVER_PRODUCTION_MODEL = "unet"` in `config/settings.py`), trained on
+**Dynamic World** labels (`LANDCOVER_LABEL_SOURCE`). The Random Forest and
+the RF + U-Net hybrid are kept as comparison models: the Validation
+Dashboard, `evaluate_landcover_classifiers.py` and
+`build_landcover_swap_comparison.py` (§10) all need them. RF is the
+simplest place to start — no GPU, no Colab, and it trains server-side on
+Earth Engine in a couple of minutes.
 
-### 8a. Prerequisite: a hand-labeled validation sample
+### 8a. Prerequisite: the hand-labeled validation sample
 
 Both RF and U-Net need `data/interim/validation_sample/validation_sample_300_labeled.csv`
-to exist before they'll train — it defines both the accuracy scoring
-ground truth *and* the spatial exclusion zone (so training never sees
-the points it'll later be scored against). If that file doesn't exist
-yet on your machine:
+— it defines both the accuracy scoring ground truth *and* the spatial
+exclusion zone (so training never sees the points it'll later be scored
+against). **This file is tracked in git, so you already have it after
+cloning** — no labeling needed.
 
-1. Generate the (unlabeled) stratified sample:
+Only if you deliberately want to redo the labeling:
+
+1. Regenerate the (unlabeled) stratified sample (`--force` overwrites the
+   existing one):
    ```
-   .venv\Scripts\python.exe scripts\generate_validation_sample.py
+   .venv\Scripts\python.exe scripts\generate_validation_sample.py --force
    ```
 2. Label it by hand via the Streamlit labeling page:
    ```
    streamlit run app/Home.py
    ```
-   then navigate to **Label Validation Points** in the sidebar and work
-   through all 200 points, picking one of the 4 bucket classes
+   then open **Team tools → Label Validation Points** in the sidebar and
+   work through all 300 points, picking one of the 4 bucket classes
    (vegetation / built_up / bare / water) for each.
-3. If you're joining a project where a teammate already has a labeled
-   sample, it's simplest to just ask them for their
-   `validation_sample_300_labeled.csv` directly (it's gitignored, so it
-   never came across in the clone) rather than relabeling 200 points
-   from scratch yourself.
+
+Relabeling changes the scoring ground truth, so every land-cover accuracy
+figure will then differ from the report's.
 
 ### 8b. Train RF and classify all of Singapore
 
@@ -232,10 +314,10 @@ yet on your machine:
 ```
 
 `--with-probabilities` is required here specifically because the
-hybrid step (§9d) needs RF's per-class probability raster, not just
-its hard classified labels — without this flag you'd only get the
-classified raster and the hybrid build would fail with a missing-file
-error later. This step needs `GEE_EXPORT_BUCKET` set (§7) since it
+hybrid comparison model (§9d) needs RF's per-class probability raster,
+not just its hard classified labels — without this flag you'd only get
+the classified raster and the hybrid build would fail with a
+missing-file error later. This step needs `GEE_EXPORT_BUCKET` set (§7) since it
 exports the classified/probability rasters via Cloud Storage. Takes a
 few minutes — training happens server-side on Earth Engine (`ee.Classifier`),
 not on your machine, so no GPU or heavy local compute either.
@@ -296,10 +378,16 @@ you relabel/rebuild them) — Colab can't produce these on its own:
 # the hand-labeled validation sample (needed by train_unet.ipynb)
 python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, VALIDATION_SAMPLE_GCS_PREFIX; gcs.upload_file('data/interim/validation_sample/validation_sample_300_labeled.csv', GCS_MODEL_BUCKET, f'{VALIDATION_SAMPLE_GCS_PREFIX}.csv')"
 
-# the land-cover hybrid raster (needed by train_heat_cnn.ipynb, after
-# you've trained U-Net and run scripts/build_landcover_hybrid.py locally)
-python -c "from src.utils import gcs; from config.settings import GCS_MODEL_BUCKET, HYBRID_RASTER_GCS_PREFIX; gcs.upload_file('data/processed/landcover/hybrid_landcover.tif', GCS_MODEL_BUCKET, f'{HYBRID_RASTER_GCS_PREFIX}.tif')"
+# the production land-cover map (needed by train_heat_cnn.ipynb) -- run
+# this after U-Net inference, see §9d
+python scripts/push_landcover_raster.py
 ```
+
+`push_landcover_raster.py` uploads whichever map `LANDCOVER_PRODUCTION_MODEL`
+points at (the U-Net's) with a hash and a note of the model and label
+source that produced it. The CNN notebook checks both and refuses to train
+on a stale or mismatched map. (The older hybrid-raster upload, under
+`HYBRID_RASTER_GCS_PREFIX`, is no longer used by the notebook.)
 
 ### 9d. Run the notebooks, then pull the results locally
 
@@ -310,14 +398,17 @@ machine:
 
 ```
 python scripts/pull_models.py --model unet
-python scripts/run_landcover_unet_inference.py
+python scripts/run_landcover_unet_inference.py --with-probabilities
+python scripts/push_landcover_raster.py
 python scripts/build_landcover_hybrid.py
 ```
 
 This downloads the trained weights (hash-verified), imports the run into
-your local MLflow store, runs full-Singapore CPU inference, and rebuilds
-the hybrid raster — which `train_heat_cnn.ipynb` needs (push it per §9c
-first). Then run that notebook the same way, and locally:
+your local MLflow store, runs full-Singapore CPU inference to produce the
+production land-cover map, pushes that map to GCS for the CNN notebook
+(§9c), and builds the hybrid comparison map. (`--with-probabilities` keeps
+U-Net's per-class probabilities, which the hybrid needs.) Then run
+`notebooks/colab_training/train_heat_cnn.ipynb` the same way, and locally:
 
 ```
 python scripts/pull_models.py --model cnn
@@ -358,33 +449,90 @@ then open the URL it prints (defaults to `http://127.0.0.1:5000`) in a
 browser. Useful for comparing loss/accuracy curves across multiple
 retrains without manually re-reading printed epoch logs.
 
-## 10. Run the app
+## 10. Build the analysis outputs
 
-Once at least the land-cover classifiers exist (§8, and ideally §9 for
-live CNN counterfactuals — the app degrades gracefully with a "not
-trained yet" message on any page whose model/raster inputs are missing,
-rather than crashing), launch the full Streamlit deliverable:
+With the production land-cover map in place (§9d), build everything the
+app reads. Run in this order — later steps read earlier steps' outputs:
 
 ```
-streamlit run app/Home.py
+.venv\Scripts\python.exe scripts\build_heat_variants.py
+.venv\Scripts\python.exe scripts\build_sensitivity_pillar.py
+.venv\Scripts\python.exe scripts\build_priority_score.py
+.venv\Scripts\python.exe scripts\build_modis_heldout.py
+.venv\Scripts\python.exe scripts\build_priority_score_confidence_bands.py
+.venv\Scripts\python.exe scripts\build_hotspot_clusters.py
+.venv\Scripts\python.exe scripts\train_heat_model_xgboost.py
 ```
 
-Opens in your browser (defaults to `http://localhost:8501`). Pages, in
-sidebar order: **Label Validation Points** (the labeling tool from
-§8a), **Island Map** (choropleth of the cooling-priority score),
-**Subzone Breakdown** (per-subzone pillar detail), **Counterfactual
-Greening** (live XGBoost + CNN "what if we greened this area"
-simulator — see §9 for what the CNN half needs to be live rather than
-showing its fallback message), **Validation Dashboard** (every
-validated output already on disk — Week-1 gates, classifier evaluation
-metrics, hotspot cluster quality, S5/S6 diagnostics, LST cross-checks —
-in one place).
+| Script | Builds | Used by |
+|---|---|---|
+| `build_heat_variants.py` | 30 m, bicubic 10 m and regression 10 m heat layers, averaged per subzone | heat pillar |
+| `build_sensitivity_pillar.py` | resident density and share aged 65+ per subzone (SingStat) | sensitivity pillar |
+| `build_priority_score.py` | PCA-weighted priority score (residents and all-places views) | Island Map, Subzone Breakdown |
+| `build_modis_heldout.py` | Landsat-vs-MODIS heat error, the noise model for the bands | confidence bands |
+| `build_priority_score_confidence_bands.py` | 90% bands and chance of staying in the top 20 | Subzone Breakdown, Validation Dashboard |
+| `build_hotspot_clusters.py` | K-means heat typology | Subzone Breakdown, Validation Dashboard |
+| `train_heat_model_xgboost.py` | subzone heat model (CPU only) | Counterfactual Greening |
+
+Most build scripts skip work if their output already exists; pass
+`--force` to rebuild (`--force-retrain` for the XGBoost script).
+
+For the Validation Dashboard's land-cover tabs, also run (needs the RF,
+U-Net and hybrid maps from §8–9):
+
+```
+.venv\Scripts\python.exe scripts\evaluate_landcover_classifiers.py
+.venv\Scripts\python.exe scripts\build_landcover_swap_comparison.py
+```
+
+## 11. Run the app
+
+```
+.venv\Scripts\python.exe -m streamlit run app/Home.py
+```
+
+Opens in your browser (defaults to `http://localhost:8501`); stop it with
+**Ctrl+C** in that terminal. Any page whose inputs are missing shows a
+message naming the script to run, rather than crashing.
+
+The sidebar is grouped by audience:
+- **Overview** (landing page) — key findings and the top 5 subzones.
+- **Explore** — **Island Map** (ranked choropleth with adjustable pillar
+  weights), **Subzone Breakdown** (one subzone's pillars, score
+  contributions and uncertainty band), **Counterfactual Greening**
+  (XGBoost subzone what-if plus the CNN street-block before/after map;
+  the CNN half needs `pull_models.py --model cnn`, §9d).
+- **Evidence** — **Validation Dashboard**, six tabs: summary, priority
+  score, land cover, heat model, hotspot types, inputs.
+- **Team tools** — **Label Validation Points** (the labeling tool, §8a).
+
+The first visit to Counterfactual Greening takes about a minute while the
+CNN loads its image patches; later visits are fast.
+
+## 12. Optional: regenerate the evaluation results
+
+The evaluation and ablation results in the final report come from:
+
+```
+.venv\Scripts\python.exe scripts\evaluate_downscaling_skill.py
+.venv\Scripts\python.exe scripts\evaluate_landcover_supplementary.py
+.venv\Scripts\python.exe scripts\evaluate_hotspot_typology.py
+.venv\Scripts\python.exe scripts\evaluate_priority_score.py
+.venv\Scripts\python.exe scripts\evaluate_scenario_models.py
+```
+
+Run them after §10. `evaluate_scenario_models.py --skip-cnn` runs only the
+XGBoost part if you don't have the CNN patch data. As the note at the top
+explains, expect values close to, but not identical to, the report's.
 
 ## Notes
 
-- `data/`, `models/`, `credentials/`, and `.env` are all gitignored —
-  nothing under them is shared via git. Each teammate needs their own
-  local copy of everything and their own credentials.
+- `data/`, `models/`, `credentials/`, and `.env` are gitignored. The one
+  exception is the hand-labeled validation sample under
+  `data/interim/validation_sample/`, which is tracked so everyone scores
+  against the same points. Everything else under `data/` and `models/` is
+  rebuilt locally by the steps above, and each teammate needs their own
+  credentials.
 - The original Colab notebooks are kept under
   `notebooks/Colab Notebooks/` for reference; the maintained pipeline now
   lives in `src/`, `validation/`, `scripts/`, and `app/`.

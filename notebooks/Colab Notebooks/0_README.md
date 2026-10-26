@@ -4,7 +4,7 @@ These are the original development notebooks, kept here as historical
 reference. **If you just want to run the pipeline, you don't need these
 at all** — the maintained, consolidated version lives in `src/`,
 `validation/`, `scripts/`, and `app/` at the repo root; see
-[`../../SETUP.md`](../../SETUP.md) for that. This guide is for actually
+[`../../README.md`](../../README.md) for that. This guide is for actually
 opening and re-running these specific notebooks (e.g. to understand how a
 decision was originally reached, or to redo a diagnostic).
 
@@ -76,7 +76,7 @@ in two completely different ways — don't confuse them:**
 | | This folder (notebooks) | The pipeline (`src/`, `scripts/`) |
 |---|---|---|
 | Auth method | **Your own personal Google login**, via an interactive browser popup (`ee.Authenticate()`) | A shared **GCP service account** — a machine identity, no browser, no popup |
-| Where credentials live | Cached by Colab/your browser session, tied to whichever Google account you're signed in as | `GEE_SERVICE_ACCOUNT` / `GEE_PRIVATE_KEY_PATH` in `.env` (see `SETUP.md`) |
+| Where credentials live | Cached by Colab/your browser session, tied to whichever Google account you're signed in as | `GEE_SERVICE_ACCOUNT` / `GEE_PRIVATE_KEY_PATH` in `.env` (see `README.md`) |
 | Who it "is" | You, personally | A robot identity anyone with the key file can act as |
 
 **To run these notebooks, you need:**
@@ -86,7 +86,7 @@ in two completely different ways — don't confuse them:**
    [code.earthengine.google.com/register](https://code.earthengine.google.com/register))
 2. Access to the shared GCP project (`nus-iss-urban-heat-sg`) — you
    should already have this if you were added as a principal for the
-   pipeline setup (see `SETUP.md`); if not, ask whoever set that up to
+   pipeline setup (see `README.md`); if not, ask whoever set that up to
    grant you access via IAM
 3. When you run each notebook's "Setup 2 — Authenticate" cell, a browser
    tab will open asking you to sign in and grant permissions — that's

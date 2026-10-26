@@ -9,7 +9,7 @@ behaviour.
 ## Run
 
 From the repo root, with the venv active and `.env` GEE credentials set
-(see `SETUP.md` §3-4):
+(see the repo-root `README.md` §3-4):
 
 ```
 python figures/cloud_threshold/generate_cloud_threshold_figures.py
