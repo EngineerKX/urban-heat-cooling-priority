@@ -5,7 +5,7 @@ including files that are normally gitignored: `.env`, `credentials/`,
 `.venv/`, `data/`, `models/`, `mlruns/`). That's a shortcut: you skip
 redownloading GEE exports and redoing today's Colab training entirely. But
 a few things are machine-specific and won't work as-is until you fix them.
-This is **not** a replacement for `SETUP.md` — it's the shorter path
+This is **not** a replacement for `README.md` — it's the shorter path
 specifically for "I already have a working copy of someone else's folder."
 
 ## 1. Fix `.env` — this WILL break otherwise
