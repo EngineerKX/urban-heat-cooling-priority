@@ -69,11 +69,11 @@ def _table(df: pd.DataFrame, height="auto", **column_config):
 
 
 _ACRONYMS = {"ndvi": "NDVI", "ndbi": "NDBI", "lst": "LST"}
-_SEASONS = {"dry": "(dry season)", "wet": "(wet season)"}
+_SEASONS = {"dry": "(inter-monsoon)", "wet": "(Dec–Feb)"}
 
 
 def _pretty_feature(name: str) -> str:
-    """'ndbi_dry' -> 'NDBI (dry season)', 'fraction_built_up' -> 'Built-up share',
+    """'ndbi_dry' -> 'NDBI (inter-monsoon)', 'fraction_built_up' -> 'Built-up share',
     'population_total' -> 'Residents'."""
     name = str(name)
     if name.startswith("fraction_"):

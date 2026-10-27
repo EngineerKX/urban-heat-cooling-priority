@@ -200,10 +200,10 @@ if HOTSPOT_CLUSTERS_PATH.exists():
             st.metric(
                 "Hotspot type", cluster_name(hs["primary_cluster"]),
                 help=f"Cluster {int(hs['primary_cluster'])} of {len(CLUSTER_NAMES)} "
-                     f"({hs['primary_cluster_method']} on dry/wet-season LST, NDVI and NDBI).",
+                     f"({hs['primary_cluster_method']} on inter-monsoon and December–February LST, NDVI and NDBI).",
             )
-            st.metric("Dry-season LST", f"{hs['lst_dry']:.1f}°C")
-            st.metric("Wet-season LST", f"{hs['lst_wet']:.1f}°C")
+            st.metric("LST, inter-monsoon", f"{hs['lst_dry']:.1f}°C")
+            st.metric("LST, December–February", f"{hs['lst_wet']:.1f}°C")
             st.caption("See the Validation Dashboard page for cluster-quality metrics and the land-cover coherence check.")
     else:
         st.caption("No S4 hotspot-cluster data for this subzone yet.")

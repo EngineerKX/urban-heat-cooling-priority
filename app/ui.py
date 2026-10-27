@@ -18,10 +18,10 @@ LANDCOVER_COLORS = {"vegetation": "#27ae60", "built_up": "#8c8c8c", "bare": "#c9
 # Cluster ids are only stable for a given clustering run: re-check these names
 # against the profile whenever scripts/build_hotspot_clusters.py is re-run.
 CLUSTER_NAMES = {
-    0: "Dense built-up, warm",
-    1: "Green and cooler",
-    2: "Waterside, dry-season spike",
-    3: "Hottest and densest",
+    0: "Mixed, moderate",
+    1: "Cool and green",
+    2: "Low greenery, dense city core",
+    3: "Hot, dense built-up",
 }
 
 _LOWER_WORDS = {"of", "and", "the"}
